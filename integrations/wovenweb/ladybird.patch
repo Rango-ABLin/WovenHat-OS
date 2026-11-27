@@ -1,0 +1,108 @@
+diff --git a/Libraries/LibHTTP/Proxy.cpp b/Libraries/LibHTTP/Proxy.cpp
+index 87d18fd1..cee9b6a7 100644
+--- a/Libraries/LibHTTP/Proxy.cpp
++++ b/Libraries/LibHTTP/Proxy.cpp
+@@ -144,6 +144,12 @@ ProxyConfiguration ProxyConfiguration::from_environment()
+ 
+ ProxyConfiguration ProxyConfiguration::from_environment(EnvironmentLookup const& lookup)
+ {
++    // WovenWeb's launcher uses a fixed local Tor endpoint without bypass lists.
++    if (auto mode = lookup("WOVENWEB_TOR_ONLY"sv); mode.has_value() && *mode == "1"sv) {
++        auto proxy = Proxy::parse("socks5h://127.0.0.1:9050"sv);
++        return ProxyConfiguration { proxy, proxy, {} };
++    }
++
+     auto first_set = [&](std::initializer_list<StringView> names) -> Optional<StringView> {
+         for (auto name : names) {
+             if (auto value = lookup(name); value.has_value() && !value->trim_whitespace().is_empty())
+diff --git a/Libraries/LibWebView/Application.cpp b/Libraries/LibWebView/Application.cpp
+index 2504fd5d..f8496a9a 100644
+--- a/Libraries/LibWebView/Application.cpp
++++ b/Libraries/LibWebView/Application.cpp
+@@ -365,7 +365,7 @@ ErrorOr<void> Application::initialize(Main::Arguments const& arguments)
+     bool file_scheme_urls_have_tuple_origins = false;
+ 
+     Core::ArgsParser args_parser;
+-    args_parser.set_general_help("The Ladybird web browser :^)");
++    args_parser.set_general_help("WovenWeb experimental browser, based on Ladybird. No anonymity guarantee.");
+     args_parser.add_positional_argument(raw_urls, "URLs to open", "url", Core::ArgsParser::Required::No);
+ 
+     args_parser.add_option(Core::ArgsParser::Option {
+diff --git a/Libraries/LibWebView/Settings.h b/Libraries/LibWebView/Settings.h
+index 8bea550d..8cc25dab 100644
+--- a/Libraries/LibWebView/Settings.h
++++ b/Libraries/LibWebView/Settings.h
+@@ -293,12 +293,12 @@ private:
+     bool m_geolocation_enabled { false };
+ 
+     BrowsingDataSettings m_browsing_data_settings;
+-    GlobalPrivacyControl m_global_privacy_control { GlobalPrivacyControl::No };
++    GlobalPrivacyControl m_global_privacy_control { GlobalPrivacyControl::Yes };
+ 
+-    bool m_background_networking_enabled { true };
++    bool m_background_networking_enabled { false };
+     bool m_filter_list_updates_enabled { false };
+-    bool m_content_blocker_enabled { false };
+-    bool m_show_content_blocker_count { false };
++    bool m_content_blocker_enabled { true };
++    bool m_show_content_blocker_count { true };
+     HashTable<String> m_content_blocker_disabled_sites;
+     Vector<ContentBlockerList> m_content_blocker_lists;
+     String m_custom_content_blocker_filters;
+diff --git a/Tests/LibHTTP/TestProxy.cpp b/Tests/LibHTTP/TestProxy.cpp
+index b4d5db83..78a3c961 100644
+--- a/Tests/LibHTTP/TestProxy.cpp
++++ b/Tests/LibHTTP/TestProxy.cpp
+@@ -105,3 +105,24 @@ TEST_CASE(no_proxy_matching)
+     configuration = configuration_from({ { "all_proxy"sv, "http://proxy"sv }, { "NO_PROXY"sv, "*"sv } });
+     EXPECT(!is_proxied("https://example.com/"sv));
+ }
++
++TEST_CASE(wovenweb_tor_mode_ignores_overrides_and_bypasses)
++{
++    auto configuration = configuration_from({
++        { "WOVENWEB_TOR_ONLY"sv, "1"sv },
++        { "http_proxy"sv, "http://attacker.invalid:8080"sv },
++        { "https_proxy"sv, "http://attacker.invalid:8080"sv },
++        { "NO_PROXY"sv, "*"sv },
++    });
++    for (auto target : { "http://example.com"sv, "https://example.com"sv, "ws://example.com"sv, "wss://example.com"sv, "http://example.onion"sv, "http://127.0.0.1"sv }) {
++        auto proxy = configuration.proxy_for(url(target));
++        EXPECT(proxy.has_value());
++        if (!proxy.has_value())
++            continue;
++        EXPECT_EQ(proxy->type, HTTP::Proxy::Type::SOCKS5Hostname);
++        EXPECT_EQ(proxy->host, "127.0.0.1"sv);
++        EXPECT_EQ(proxy->port, 9050);
++        EXPECT(proxy->resolves_hostnames());
++    }
++    EXPECT(configuration.no_proxy().is_empty());
++}
+diff --git a/UI/Qt/BrowserWindow.cpp b/UI/Qt/BrowserWindow.cpp
+index 346a8f5d..1e1ccf89 100644
+--- a/UI/Qt/BrowserWindow.cpp
++++ b/UI/Qt/BrowserWindow.cpp
+@@ -1043,8 +1043,8 @@ int BrowserWindow::tab_index(Tab* tab)
+ void BrowserWindow::update_window_title(QString const& title)
+ {
+     char const* format = is_private() == WebView::IsPrivate::Yes
+-        ? "%1 - Ladybird (Private Browsing)"
+-        : "%1 - Ladybird";
++        ? "%1 - WovenWeb (Private Browsing)"
++        : "%1 - WovenWeb";
+     setWindowTitle(QString(format).arg(title));
+ }
+ 
+diff --git a/UI/Qt/main.cpp b/UI/Qt/main.cpp
+index 4b0897b8..0bf5a1be 100644
+--- a/UI/Qt/main.cpp
++++ b/UI/Qt/main.cpp
+@@ -140,7 +140,7 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
+                 app->open_startup_tabs(*restored_window, browser_options.urls);
+         } else {
+             auto& window = app->new_window(browser_options.urls, configuration);
+-            window.setWindowTitle("Ladybird");
++            window.setWindowTitle("WovenWeb");
+         }
+ 
+         app->offer_newest_pending_crash_report();

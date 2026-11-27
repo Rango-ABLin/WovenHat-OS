@@ -1345,7 +1345,11 @@ pub(super) fn load_with_geometry(
     {
         return None;
     }
-    let stack_top = setup_argv_stack(page_table, stack, args)?;
+    let stack_top = if env.is_empty() {
+        setup_argv_stack(page_table, stack, args)?
+    } else {
+        setup_argv_env_stack(page_table, stack, args, env)?
+    };
     let (initial_entry, initial_stack) = setup_lifecycle_stack(
         page_table,
         stack,

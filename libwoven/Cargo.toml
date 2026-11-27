@@ -9,6 +9,8 @@ path = "src/lib.rs"
 [features]
 default = ["userspace-allocator"]
 userspace-allocator = []
+# WovenWeb runtime remains opt-in until the general kernel VM lease layer is qualified.
+reclaiming-allocator = ["userspace-allocator"]
 
 [dependencies]
 # The same audited, freestanding SHA-256 the kernel uses for boot

@@ -1,0 +1,66 @@
+{
+  "status": "host-only prerequisite; production mapping integration remains open",
+  "artifact": "audit-artifacts/wovenweb-journal-1792942623423",
+  "tests": {
+    "journal-tests": {
+      "passed_counts": [
+        16
+      ],
+      "sha256": "9096496707b5c143d9222194d57dca718d6219d5f1a606c2816476697aa69960"
+    },
+    "sdk-tests": {
+      "passed_counts": [
+        177,
+        3
+      ],
+      "sha256": "4bb18b04d5a60fd645ad6987a328dbecb9502523c850735fb822dfe42c6747df"
+    },
+    "sdk-clippy": {
+      "passed_counts": [],
+      "sha256": "f84c4fcc148871a3deabcf38f6abb527d68d4b4f21b7cee934377aa8b3b339d8",
+      "result": "passed with -D warnings; all features/all targets"
+    }
+  },
+  "source_sha256": {
+    "kernel/src/vm_journal.rs": "045df2831b30955d2b217b1b0b76495a1e67f9b3efc98a94196127764b97f259",
+    "kernel/src/vm_lease.rs": "209f72ade36036fb65373cf6e4b50a498dd4f89c18844074d762b4b488fa7fa1",
+    "tests/vm_lease.rs": "b4a9ff0d4a62669452dce67f81e7920955e64a1f2e773b7eb1168f0faac5ae45",
+    "libwoven/src/heap_allocator.rs": "b2cc20fae16be8d1cb94dd1e945136c162036c045411864e3e7d13ee5dfae1fa"
+  },
+  "limits": [
+    "no real page-table or backing-file resource pins",
+    "quiescence/liveness must be verified by scheduler integration",
+    "canonical mapping generations must decide recovery outcome",
+    "no production mapping/pager/thread/fork/exec/teardown call sites yet"
+  ],
+  "security_review": {
+    "reported_revision": "9f45e2ff7e3b1bd8a2101057ae5143ced9c82125",
+    "check_url": "https://github.com/Rango-ABLin/WovenHat-OS/runs/121207508049",
+    "alerts": [
+      {
+        "path": "libwoven/src/heap_allocator.rs",
+        "reported_line": 221,
+        "title": "Access of invalid pointer",
+        "severity": "high",
+        "status": "under review"
+      },
+      {
+        "path": "libwoven/src/heap_allocator.rs",
+        "reported_line": 250,
+        "title": "Access of invalid pointer",
+        "severity": "high",
+        "status": "under review"
+      },
+      {
+        "path": "libwoven/src/heap_allocator.rs",
+        "reported_line": 297,
+        "title": "Access of invalid pointer",
+        "severity": "high",
+        "status": "under review"
+      }
+    ],
+    "change": "added explicit non-null assertion before kept-pointer test write; not a claim that alerts are resolved",
+    "full_paths": "not supplied by connector; UI inspection blocked by URL verification and not retried"
+  },
+  "crash_schedules": 128
+}

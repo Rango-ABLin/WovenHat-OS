@@ -1,0 +1,12 @@
+{
+  "revision": "fbc761b86b1d19ab0c8d023604bda1971239812b",
+  "status": "qualified two-object controlled C++ global lifecycle ordering fixture",
+  "workflow_run": 40321141200,
+  "native_artifacts": [
+    { "cpus": 1, "artifact_id": 12648998183, "archive_sha256": "b2ac3b7bc823fa6fa2a26fe02b4fb86ef9b44cc0f9cbdb6942d4ba77216b35d8" },
+    { "cpus": 2, "artifact_id": 12658505616, "archive_sha256": "9a84e7d32d42b0846f40cf285f2126149675a346f47eea1156326b89ff31fbe4", "note": "initial matrix job cancelled during dependency installation; isolated rerun succeeded" },
+    { "cpus": 4, "artifact_id": 12648558807, "archive_sha256": "13f8896b2f4f6e880657701bb7619ca3ce8a16907e7441aa898e6cf374a60076" }
+  ],
+  "sdk_artifact": { "artifact_id": 12649022520, "archive_sha256": "fcb730ac36c32c2c9d616451e287bb7d9fcdda54e59c1b001f34022ff688350d" },
+  "limits": "This ET_EXEC fixture does not qualify a general C++ runtime, loader lifecycle, libc++, LibCore, Ladybird, Tor, VPN, or privacy properties."
+}

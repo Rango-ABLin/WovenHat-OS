@@ -1,0 +1,317 @@
+# WovenWeb native platform route
+
+The target is a Ladybird-derived browser running inside WovenHat. A Windows/Linux
+browser on the development machine is not native WovenHat execution. The current
+native deliverable is a network platform SDK and real Ring-3 protocol probe, not
+that finished browser. User priority permits this work alongside the unfinished
+graphics roadmap; no later graphics stage is accepted by it.
+
+## Port rather than replace the engine
+
+Keep LibWeb/LibJS and their standards behavior. Implement a WovenHat platform
+backend in AK/LibCore, then a native LibWebView UI backed by WovenUI surfaces.
+Upstream Documentation/Porting.md requires separate platform and UI work. This
+avoids a requirement to port the full Qt desktop stack, but does not eliminate
+libc, C++ runtime, dependency, IPC, memory, graphics or sandbox work.
+
+| Boundary | Existing WovenHat primitive | Required implementation / evidence |
+| --- | --- | --- |
+| Toolchain | Rust ELF loader and fixed native syscall ABI | Cross C/C++ sysroot, compiler runtime, libc/libc++, threading/TLS and exceptions policy; boot a C++ ABI fixture |
+| Memory | mmap/munmap, file mappings, surfaces, shared memory | Real allocation/free, larger safe arenas, protections, shared-buffer lifetime/sealing and stress/teardown gates |
+| Process | ELF loading, spawning, per-process handles | LibCore Process backend with explicit argv/environment/FD actions and renderer termination |
+| Threads | Thread create/join, TLS registration | C++ TLS/runtime integration and scheduling/synchronization tests |
+| Event loop | Generation-tagged completions, ports and event waits | LibCore EventLoopImplementationWovenHat using completions, timers and cancellation |
+| Files | Descriptor reads/writes/seeks and VFS | LibCore System/File bridge, scoped profile/resource access, errors and metadata |
+| IPC | Endpoint messages, service discovery and shared objects | LibIPC transport and handle transfer; do not pretend endpoint IDs are POSIX FDs |
+| Networking | New owned async TCP SDK + SOCKS5 remote-name CONNECT | LibCore Socket/CURL adapter, deadline/cancellation tests, certificate-verified TLS and trusted time |
+| Rendering | Shared surfaces, compositor, text/image substrates | LibWebView ViewImplementation and Application subclasses; input, resize, tabs, accessibility and frame damage |
+| Sandbox | Capabilities, service/file/device policy | UI/network/renderer/image-decoder roles, no renderer raw NetworkIo, broker-only egress and hostile guest tests |
+| Tor | SOCKS5 client transport now available | Native Tor daemon plus its TLS/crypto and runtime dependencies, bootstrap/control authentication and circuit isolation |
+| Updates | WovenHat signed package/update primitives | WovenWeb packaging, upstream security tracking, signed releases and rollback |
+
+The upstream vcpkg manifest pins OpenSSL/curl, ICU, HarfBuzz, compression and image
+libraries, FFmpeg, Skia and other dependencies. Cross-build those dependencies;
+changing a platform macro or renaming namespaces does not make them work.
+
+## Process ABI audit
+
+The current Ring-3 `SPAWN_COMMAND` ABI copies only a bounded ASCII command line,
+splits it on whitespace, resolves a bare executable under `/bin`, and requires
+`FileRead` plus `ProcessCreate`. It carries neither quoted/structured argv,
+environment variables, working directory nor descriptor actions. Do not present
+this shell-oriented convenience syscall as a LibCore Process backend: a browser
+helper/renderer port needs an explicit bounded argv/environment/FD-action ABI,
+ownership-aware child handles and cancellation/owner-death tests before one can
+be introduced.
+
+The loader now has a separate bounded `argv`/`envp` stack primitive: up to eight
+ASCII environment strings share the existing 512-byte string budget, are copied
+after argv strings, and are terminated after argv's NULL. Existing loader paths
+continue to invoke the old wrapper and therefore receive an empty environment;
+the explicit kernel loader API is the only path that opts into a non-empty
+environment. Hosted Linux acceptance at
+`f3ed3054d7763c33c92657bd945244195752dd9b` passed the actual mapped-stack
+layout and rollback gate on 1/2/4 CPUs (workflow `40481475589`, jobs
+`122112582179`, `122112581419`, and `122112581481`): argc, argv, the argv NULL,
+envp, its NULL, all copied strings, too-many-environment rollback, non-ASCII
+rejection, and exact frame cleanup are checked. This is loader delivery only.
+There is still no inherited environment, user syscall, descriptor action,
+guest crt0 consumer, or LibCore Process acceptance.
+
+## Controlled freestanding C ABI qualification
+
+The native C++ probe now links one separate header-free C23 object compiled by
+target-qualified Clang. The object makes an eight-integer C-to-Rust call,
+checks a two-word aggregate return, and verifies initialized and BSS storage
+before reporting its explicit status to the Rust entry adapter. Hosted Linux
+QEMU acceptance at `d7c59d7f56bd9bce1615b1351de6db5f7e7169dc` passed the
+complete C++/C fixture and cleanup baselines on 1, 2 and 4 CPUs (workflow
+`40503977639`, jobs `122188464467`, `122188464330`, and `122188464202`); SDK,
+core-foundation and CodeQL also passed.
+
+This is compiler/ABI evidence only. The fixture has no C startup object,
+headers, allocator, libc, POSIX, threads, dynamic linking, floating point, or
+TLS-runtime coverage, and it is not a LibCore, LibWeb, Tor, VPN, or browser
+completion claim.
+
+## Atomic package-capability publication
+
+The 4-CPU baseline exposed a real package-spawn race: a newly Ready task began
+with the normal user capability set, then received its package declaration in a
+second scheduler acquisition. A cloud-provider fixture can issue its first
+`Secrets` syscall during that gap and exit before publishing its service. The
+effective package capability set and empty lineage array are now installed
+while the original scheduler lock still protects the new task, before that
+lock is released. The focused source contract and the hosted
+1/2/4-CPU core-foundation revalidation at the same revision pass. This fixes
+one launch-authorization ordering bug; it does not create a general process
+API, change the package authority model, or establish browser sandboxing.
+
+## Memory blockers found in source
+
+At the audited revision, config.rs limits anonymous mappings to 16 and shared
+memory objects to 16 pages. userspace.rs uses USER_MMAP_STRIDE=0x10000 and rejects
+anonymous mappings larger than that stride: 64 KiB per mapping, approximately
+1 MiB total anonymous arena. libwoven's current allocator owns one 64 KiB arena
+and does not reclaim individual allocations. These are concrete incompatibilities
+with a modern browser, not build-flag problems. Rework bounded region management,
+allocation/deallocation and shared buffers with ownership and OOM tests. Do not
+simply raise constants or use the current bump allocator as a browser heap.
+
+## First implemented platform boundary
+
+libwoven::net now exposes owned TcpStream handles and borrowed Pending operations.
+Sends are copied on submission; receives validate their original capacity before
+kernel copyout. Pending work is neither Send nor Sync because completions are task-owned.
+Drop cancels live operations and closes sockets, without exposing
+raw constructors or keeping Ring-3 pointers in kernel work queues. poll supports
+an asynchronous caller; wait blocks on completion events; wait_timeout uses a
+completion port and a relative 100 Hz deadline. A timeout cancels the operation.
+The legacy net::Socket token remains available for source compatibility.
+
+libwoven::socks5 validates bounded ASCII DNS/punycode names, encodes ATYP=DOMAIN,
+parses fragmented IPv4/IPv6/domain replies and refuses negotiation errors.
+Only the explicit proxy endpoint is connected; no local name lookup or direct
+target retry is implemented. No-auth SOCKS does not provide per-tab Tor circuit
+isolation. The transport is not TLS and does not authenticate a proxy as Tor.
+Deadlines are per operation; an overall request deadline and batched event-loop
+registration remain work for the engine/network-service adapter.
+
+The feature-isolated wovenweb-net-test boots an independently compiled Ring-3
+probe. It checks network-authority denial, SOCKS remote name resolution, HTTP
+content read into native DOM parsing, undersized receive refusal, repeated
+cancellation, proxy refusal, timeout, and cleanup against pre-run counters.
+The host captures packets and checks for IPv4 UDP DNS. This does not establish
+IPv6/DNS-over-HTTPS leak resistance, real Tor connectivity or anonymity.
+
+## Serverless-first network choice
+
+The user has no VPN gateway. First target native Tor access without a VPN; the
+Tor network supplies relays and exits, so a personally hosted VPN server is not
+required. Port the Tor daemon on top of the same runtime/TLS work and restrict
+browser network service egress to it. A desktop Tor process may be used as an
+explicit development proxy only; do not market that as an in-OS Tor daemon.
+
+WovenHat's future own VPN should use an established audited protocol such as
+WireGuard and have a separate local test gateway. It still needs an independent
+endpoint for public egress. Another home computer can test the tunnel but cannot
+hide the home's public exit address. No endpoint, keys or operating VPN is
+fabricated. Tor Project warns that adding a VPN can reduce anonymity if configured
+incorrectly: https://support.torproject.org/tor-browser/general/vpn-with-tor/
+
+## Ordered acceptance to a working browser
+
+1. Accept native networking transport on 1/2/4 CPUs and preserve its evidence.
+2. Accept native memory/runtime and a cross-built C++ ABI fixture, then AK tests.
+3. Accept LibCore files, processes, IPC, timers and sockets; run helper processes
+   inside the guest with cancellation, OOM, owner death and stale-handle tests.
+4. Cross-build and test cryptographic/TLS/font/image dependencies, then LibJS and
+   headless LibWeb inside WovenHat. TLS must verify certificates and hostnames.
+5. Implement native LibWebView chrome and display real pages with links, forms,
+   tabs, scrolling and download policy. Add the executable to the signed catalog.
+6. Port native Tor, enforce broker-only egress, test onion/HTTPS/WS/download paths
+   and failure containment with packet captures. Add a VPN only with a real endpoint.
+7. Run web-platform, engine, sandbox, update and full OS acceptance before calling
+   the result a full browser or asserting privacy properties.
+
+Upstream references (source pinned by integrations/wovenweb/upstream.json):
+Documentation/Porting.md, Libraries/LibCore/{System,Process,Socket,AnonymousBuffer,
+EventLoopImplementation}.h, Libraries/LibWebView/{Application,ViewImplementation}.h,
+AK/Platform.h and vcpkg.json.
+
+## Experimental reclaiming heap follow-up (2026-10-25)
+
+An opt-in reclaiming Rust allocator and native memory fixture are implemented.
+Default SDK applications retain the legacy allocator. The bounded VM window
+is unchanged; full runtime acceptance remains open because Clippy/fresh builds
+were blocked by Windows Application Control and network/GUI regressions remain
+incomplete. See [heap evidence and limits](wovenweb-heap-acceptance.md).
+
+## WovenWeb regression follow-up (2026-10-25)
+
+Fresh current-source heap, opt-in heap networking and default-allocator legacy
+GUI matrices pass on 1/2/4 CPUs. Selected SDK/kernel/probe/GUI Clippy gates pass;
+root workspace Clippy remains policy-blocked. The VM transaction state machine
+is host-tested scaffolding only; production integration and larger VM limits
+remain open. See wovenweb-heap-acceptance.md, wovenweb-heap-evidence.json and
+wovenweb-vm-transactions.md. No native browser completion is claimed.
+
+## Native C++ ABI fixture (2026-10-25)
+
+A header-free Clang C++23/Rust Ring-3 probe passes on 1/2/4 CPUs with exact
+resource cleanup. It covers integer/aggregate calls, guarded local static
+initialization, aligned virtual objects and destructors; selected Clippy gates
+pass. This is a controlled ABI fixture, not libc++, an engine build or full
+runtime acceptance. Production VM integration remains open. Evidence and limits:
+[Native C++ ABI fixture](wovenweb-cxx-acceptance.md).
+
+## Pager ownership qualification (2026-10-25)
+
+Production queued/active pager work now prevents exited-owner reaping, with
+sequence-qualified completion and bounded reserved result capacity. Seven host
+queue tests and the real-pager plus focused zombie fixture pass on 1/2/4 CPUs;
+heap/network/C++ regressions also pass on all three CPU counts. Default and
+affected kernel Clippy gates pass. Full VM transactions, exec/unmap/fork races,
+thread-fault publication and native browser acceptance remain open. Local root
+host checks remain signing-policy blocked; new hosted queue lint is pending.
+See [pager lifetime evidence and limits](wovenweb-pager-lifetime.md).
+
+## Sibling pager publication follow-up (2026-10-25)
+
+The worker now publishes through retained process ownership instead of assuming
+the faulting task is the leader. A real two-page sibling-thread fixture fails
+the old lookup with zero canonical resident pages and passes the corrected
+lookup with two, two completed faults and exact reaping/cache cleanup on 1/2/4
+CPUs. Earlier portable Linux matrix dac3686e passed all three guest jobs, SDK
+and Rust/PR CodeQL checks; this new source revision still needs hosted checks.
+VM generations and exec/unmap/fork races remain open. See pager lifetime
+evidence and limits in wovenweb-pager-lifetime.md.
+
+## Physical handoff retention qualification (2026-10-25)
+
+Production reaping now includes an outgoing process pin for every prepared CPU
+context switch, released only on the incoming stack. Dead/Blocked metadata no
+longer stands in for physical departure. The internal nonblocking exit observer
+requires scheduler acknowledgement after dropping PROCESS_TABLE; syscall ABI
+and process-info state encoding remain unchanged. An unchanged Stage7.4 assertion
+first exposed the observer race; its failure log is retained. Six production
+module host tests, metadata fixture plus real boot/pager/sibling tests and
+heap/network/C++/legacy-GUI regressions pass on 1/2/4 CPUs. Default and affected
+kernel lints pass. Hosted current-head qualification is pending; full VM journal,
+wake/migration/thread-stack lifetime, exec/unmap/fork and browser work remain
+open. See wovenweb-handoff-lifetime.md and wovenweb-handoff-evidence.json.
+
+## Queued pager page-state qualification (2026-10-25)
+
+Worker execution now refreshes canonical owner/root/file binding and publishes
+only a single completed page delta, preserving unrelated page metadata. Already
+resident queued duplicates complete without a second map. The old snapshot
+overwrite is reproduced with one resident for two completed disjoint faults;
+new disjoint/duplicate fixtures and metadata checks pass with exact cleanup on
+1/2/4 CPUs. Heap/network/C++/legacy GUI regressions and selected lints also pass.
+830d8886 hosted guest/SDK/CodeQL/core-foundation checks succeeded; this expanded
+source awaits new hosted qualification. Same-file ABA, exec/raw-unmap/fork,
+fast fault/eviction/cancellation recovery and complete VM journal admission
+remain open, as do browser/runtime/Tor and full release acceptance. See
+wovenweb-page-publication.md and wovenweb-page-publication-evidence.json.
+
+## Mapping lineage source integration (2026-10-26)
+
+Fresh mapping constructors now issue checked nonzero lineage IDs, included in
+pager binding validation with existing owner/root identity. A real same-file
+unmap/remap fixture and isolated Linux mutation control are added. This source
+is NOT qualified yet: four Python parser checks pass; Rust and guest checks
+await hosted CI because Windows now blocks clippy-driver and dependency build
+scripts (4551). No policy bypass or repeated blocked invocation is attempted.
+Initial fixture failures before worker release are retained without claiming
+a reproduced stale fault. Current negative control must show precise acceptance
+with only the tag comparison removed. ABI/capabilities/limits stay fixed; active
+work lifetime and full VM journal integration remain open. See
+wovenweb-mapping-generations.md and its evidence JSON.
+
+## Focused mapping generation qualification (2026-10-26)
+
+5a710a1f hosted positive remap/cleanup checks pass on 1/2/4 CPUs. The isolated
+negative control reproduces exit0/resident1 with only the tag comparison removed;
+production gives -11/resident0 with exact cleanup. Four issuer tests, SDK179+3,
+queue7, handoff6 and their lints pass. Artifacts are archived; hosted source
+hashes match canonical Git LF blobs (local CRLF differences are documented).
+This qualifies the lineage boundary only. CodeQL summary is currently neutral.
+Linux portable heap/network/C++ and legacy GUI matrices plus selected lints
+are added pending qualification because Windows builds remain policy-blocked.
+Fourteen local Python checks pass. See mapping generation docs/evidence.
+
+## Linux runtime baseline and static TLS experiment (2026-10-26)
+
+58938b7e Linux heap/network/C++/legacy Stage19.2 GUI matrices and default/selected
+kernel plus probe lints pass on 1/2/4 CPUs. SDK/pager/generation mutation gates
+and PR CodeQL succeed (no new alerts, zero annotations). Artifacts match Git LF
+blobs; compiler/serial/image evidence is archived in wovenweb-linux-native-evidence.json.
+Next, the controlled C++ fixture adds PT_TLS/local-exec initialized/zero words,
+64-byte alignment, two sibling templates/isolated values across yields, and
+main FS restoration. All prior C++/cleanup assertions remain. This extension is
+UNQUALIFIED pending hosted compilation/guest checks; fourteen local Python
+checks pass only. Console-only authority, ABI and VM limits remain unchanged.
+See wovenweb-cxx-static-tls.md; general runtime and browser/Tor work stay open.
+
+## Controlled static compiler TLS qualification (2026-10-26)
+
+92328129 hosted C++ static thread-local-storage (not HTTPS TLS) checks pass on
+1/2/4 CPUs: initialized/zero words, alignment, two sibling templates/addresses,
+values across 64 yields each and main FS/value restoration after joins. Existing
+ABI/guard/512-object/destructor/heap and exact kernel cleanup checks remain.
+Heap/network/Stage19.2 GUI and selected lints also pass; SDK/pager gates pass.
+Canonical source/serial/compiler evidence is archived. New CodeQL summary is
+neutral; holding this documentation update locally until full scan collection
+to avoid repeatedly cancelling it. No dynamic TLS/destructors, concurrent
+guards, cross-CPU migration, FP or general runtime/browser acceptance follows.
+See wovenweb-cxx-static-tls.md and its evidence JSON.
+
+Static-thread-local fixture scan collected: complete Rust analysis and PR
+CodeQL on 92328129 succeeded, no new alerts in changed code and zero PR
+annotations. Publishing the held qualification/evidence update now; no pending
+neutral summary is treated as clean. Full runtime/browser boundaries remain.
+
+## Controlled C++ global lifecycle source follow-up (2026-10-26)
+
+The qualified C++ probe retains one `.init_array` constructor and checks its single
+registered destructor through a bounded private `__cxa_atexit` adapter, after
+its static TLS worker join. Hosted Linux guest/lint acceptance at
+`99fa46dc762321a46055899c18f9b4cc349c5284` passes on 1/2/4 CPUs. Immutable
+canonical-source, compiler, image and serial evidence is archived with the
+workflow artifacts. This does not exercise the kernel dynamic-image lifecycle
+path or qualify a general C++ runtime. See [global lifecycle scope](wovenweb-cxx-global-lifecycle.md)
+and its [evidence](wovenweb-cxx-global-lifecycle-evidence.json). The two-object
+ordering extension now also passes a fresh hosted 1/2/4-CPU matrix; see its
+[ordering evidence](wovenweb-cxx-global-lifecycle-ordering-evidence.json).
+
+## Bounded initial environment loader qualification (2026-10-27)
+
+The initial stack can now carry an explicitly supplied, bounded envp vector
+through the internal ELF loader while every existing loader path stays on its
+empty-environment wrapper. The hosted 1/2/4-CPU acceptance maps and reads back
+argc, argv, argv NULL, envp, envp NULL and copied strings, and proves cleanup
+after count/non-ASCII rejection. The WovenWeb native matrix now runs this gate
+for future loader changes. This does not provide a userspace environment API,
+inheritance, descriptor actions, LibCore Process backend, libc startup, or a
+browser helper process.

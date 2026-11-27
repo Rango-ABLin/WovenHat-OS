@@ -1,0 +1,31 @@
+{
+  "revision": "99fa46dc762321a46055899c18f9b4cc349c5284",
+  "status": "qualified controlled C++ global lifecycle fixture",
+  "native_jobs": [
+    { "id": 121537970494, "cpu_count": 1, "status": "success", "artifact_id": 12646070695, "artifact_sha256": "33e7ce1d0480502f0538c7f4b8a8b13d56ed12fed04f4755020d18b5d280e5f2", "image_sha256": "2e1cbbdce5c7cdbb3a8742fdbcfaeabb35f8a1c8f972790d46bd82549a46d3be", "serial_sha256": "493d8ccf0b668abb64014dc9d56e4122244515fd25569cfaff43f4ed19846705" },
+    { "id": 121537970453, "cpu_count": 2, "status": "success", "artifact_id": 12646310300, "artifact_sha256": "425803821195f32f00624922345418b52fef276fb306e9e6ae65835923712b49", "image_sha256": "44a86cf5823f9737e3c1219e81aa671d67db4cb3cb2e12d7d9616fec437dd79d", "serial_sha256": "e0e91ac93e3be46fef18bf9248ac88c3d512d5c23e3460bc4e17e0d3833e13f1" },
+    { "id": 121537970228, "cpu_count": 4, "status": "success", "artifact_id": 12644634623, "artifact_sha256": "50194f8a908fe04a72e4a518ecf34001230a632075e03f957079bd5475ff31fd", "image_sha256": "609ba86435a39161738218aecdc440ee0f51de2a329ce46ebe89eb3d0a526fb1", "serial_sha256": "f601eaac2d87fe5f0d6a9d16fe937360363464be26d746ac47f1641287d29fce" }
+  ],
+  "compiler": { "identity": "Ubuntu clang version 18.1.3 (1ubuntu1)", "executable_sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45" },
+  "sdk": { "job_id": 121537970384, "artifact_id": 12646025147, "artifact_sha256": "dd1e97c8e7297532ecc70148205cc154dbb9465ad332deacad78a1e342237034", "libwoven_tests": 179, "compile_fail_tests": 3, "queue_tests": 7, "handoff_tests": 6, "generation_tests": 4, "python_contracts": 17 },
+  "codeql": { "job_id": 121538264322, "status": "success", "new_alerts": 0, "pr_annotations": 0 },
+  "source_sha256": {
+    "kernel/src/task.rs": "916ad61eb9e218a73b69ce71339a1b7dde3a49d4626497831736b6ecaccd8af5",
+    "kernel/src/userspace.rs": "ebf9b73a0d79836989be84ef9756a2c196482fce775f922cfd885e35d3e49473",
+    "kernel/src/vm_generation.rs": "5bf4c9681662e52b2021e485a1cdf9c7fc195d8a3853fc081e9b7eafa396dfd0",
+    "kernel/src/vm_handoff.rs": "51c8ef98e941d280981ba485f5a66fef38d7902ce6bf6b8d582faa7ebecd9531",
+    "kernel/src/wovenweb_cxx_gate.rs": "6cf9265f3d1930a348862213b3e146b14aa5c96ecf31a0b9746967945999395b",
+    "libwoven/src/heap.rs": "1f6ebd428ec8e0242788ae2247f29ac6e470a6582c3b6aa6e7e06f7575417763",
+    "libwoven/src/heap_allocator.rs": "343f7dbb1a2dd58ebd02e9188a6c4cef806782a8644fbdede3b894bc60e0bd83",
+    "libwoven/src/lib.rs": "29c5e6271aee674b9db93c706e623e3dc7a21e5997606a2b087c77654f2c5bb5",
+    "tools/wovenweb-cxx-probe/Cargo.toml": "93c4e16830e2d7e5772a8289b23318416f400799e5ea61800c4acc30a2fc9f46",
+    "tools/wovenweb-cxx-probe/build.rs": "ed327411b4538dd6bc87af4cff83e54393aac6bf596945aed46b4e6c296aa287",
+    "tools/wovenweb-cxx-probe/link.x": "d6db99b7fb53cb2c58562308063858f3ab1e45e74fd0d0f5ac65cdf66c9ceeb8",
+    "tools/wovenweb-cxx-probe/src/dispatch.cpp": "fb8b47d9fcf96eccdb35b90df7b93da24e38c4db9feab2b1aa0bae5c509954bc",
+    "tools/wovenweb-cxx-probe/src/fixture.cpp": "53ae67f97da115cef961fc45a4bf8dfcc8da785046da629580158deff0e6f090",
+    "tools/wovenweb-cxx-probe/src/fixture.hpp": "d08b37c7ac2e725b38df0d54f35cd3d3a70a364454147bd4606d5215a6eb125a",
+    "tools/wovenweb-cxx-probe/src/lifecycle.cpp": "8d9c7a39f1b17c406b8f392430649c1e4b1a928b1e2c9eda5ead0a532f6facb9",
+    "tools/wovenweb-cxx-probe/src/main.rs": "039dcaaeab79402851d4ab718da2c116a92835f2a29eba669fff1e34b21ee4af",
+    "tools/wovenweb-cxx-probe/src/tls.cpp": "06958b72032034b67c57cf62800a3343cbd1f8a2910d16f38e38d966ac6c6554"
+  }
+}

@@ -203,7 +203,7 @@ pub fn unwatch(handle: u64, task: TaskId) {
     }
 }
 
-#[cfg(feature = "stage10-8-test")]
+#[cfg(any(feature = "stage10-8-test", feature = "wovenweb-net-test"))]
 pub fn active_count() -> usize {
     TABLE.iter().filter(|p| p.lock().owner.is_some()).count()
 }

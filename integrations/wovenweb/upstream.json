@@ -1,0 +1,6 @@
+{
+  "repository": "https://github.com/LadybirdBrowser/ladybird.git",
+  "revision": "3eef72c5b549d7207c60c694043a78c258ba8a08",
+  "license": "BSD-2-Clause",
+  "status": "experimental-host-foundation"
+}
