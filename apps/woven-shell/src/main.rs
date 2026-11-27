@@ -4307,7 +4307,9 @@ impl Desktop {
                     b'W' => theme_text(),
                     _ => continue,
                 };
-                canvas.set(left + column as i32, top + row as i32, color);
+                let x = left + column as i32 * 2;
+                let y = top + row as i32 * 2;
+                canvas.fill_rect(x, y, 2, 2, color);
             }
         }
     }

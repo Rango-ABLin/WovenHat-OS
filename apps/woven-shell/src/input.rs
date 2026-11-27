@@ -1,7 +1,7 @@
 //! Bounded shell input work and normalized tablet coordinates.
 
 /// Maximum messages and input events processed before repaint/presentation.
-pub const EVENT_BATCH: usize = 32;
+pub const EVENT_BATCH: usize = 64;
 
 /// Map the HID ABI's 0..=32767 axis to logical desktop pixel centers.
 /// Clamp malformed values; dimensions of one pixel remain pinned at zero.

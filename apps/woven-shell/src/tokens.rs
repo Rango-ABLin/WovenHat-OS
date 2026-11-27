@@ -121,8 +121,8 @@ pub const CURSOR: [&[u8; 7]; 10] = [
     b"B......", b"BB.....", b"BWB....", b"BWWB...", b"BWWWB..", b"BWWWWB.", b"BWWWWWB", b"BWWBBBB",
     b"BWB....", b"BB.....",
 ];
-pub const CURSOR_WIDTH: i32 = 7;
-pub const CURSOR_HEIGHT: i32 = 10;
+pub const CURSOR_WIDTH: i32 = 14;
+pub const CURSOR_HEIGHT: i32 = 20;
 
 /// The application catalog: one `*.app` file per application.
 pub const CATALOG: &str = "/share/applications";
