@@ -2222,7 +2222,7 @@ impl Desktop {
         if !self.qs_open {
             return Area::new(0, 0, 0, 0);
         }
-        let height = self.qs_panel_height().min(460);
+        let height = self.qs_panel_height().min(self.taskbar_top() - 8).max(0);
         let y = (self.taskbar_top() - height - 8).max(0);
         Area::new(self.width - QS_WIDTH - 8, y, QS_WIDTH, height)
     }
@@ -4867,27 +4867,8 @@ impl Desktop {
                             return self.qs_activate_action(action);
                         }
                     }
-                    // Brightness slider
-                    let bslider = self.qs_slider_area_at(panel, 0);
-                    if bslider.contains(x, y) {
-                        let track_x = bslider.x + 36;
-                        let track_w = (bslider.width - 44).max(1);
-                        let pct =
-                            ((x - track_x).clamp(0, track_w) * 100 / track_w).clamp(0, 100) as u8;
-                        self.brightness = pct;
-                        return panel;
-                    }
-                    // Volume slider
-                    let vslider = self.qs_slider_area_at(panel, 1);
-                    if vslider.contains(x, y) {
-                        let track_x = vslider.x + 36;
-                        let track_w = (vslider.width - 44).max(1);
-                        let pct =
-                            ((x - track_x).clamp(0, track_w) * 100 / track_w).clamp(0, 100) as u8;
-                        let _ = self.status.set_volume(pct);
-                        return panel.union(self.status_icons_area());
-                    }
-                    // Footer buttons
+                    // Footer buttons are painted over the lower rows on short
+                    // screens, so their hit targets must also win.
                     let footer = self.qs_footer_area_at(panel);
                     let btn_y = footer.y + 8;
                     let btn_h = 24;
@@ -4920,6 +4901,26 @@ impl Desktop {
                     }
                     if power.contains(x, y) {
                         return self.power(false);
+                    }
+                    // Brightness slider
+                    let bslider = self.qs_slider_area_at(panel, 0);
+                    if bslider.contains(x, y) {
+                        let track_x = bslider.x + 36;
+                        let track_w = (bslider.width - 44).max(1);
+                        let pct =
+                            ((x - track_x).clamp(0, track_w) * 100 / track_w).clamp(0, 100) as u8;
+                        self.brightness = pct;
+                        return panel;
+                    }
+                    // Volume slider
+                    let vslider = self.qs_slider_area_at(panel, 1);
+                    if vslider.contains(x, y) {
+                        let track_x = vslider.x + 36;
+                        let track_w = (vslider.width - 44).max(1);
+                        let pct =
+                            ((x - track_x).clamp(0, track_w) * 100 / track_w).clamp(0, 100) as u8;
+                        let _ = self.status.set_volume(pct);
+                        return panel.union(self.status_icons_area());
                     }
                     return empty;
                 }

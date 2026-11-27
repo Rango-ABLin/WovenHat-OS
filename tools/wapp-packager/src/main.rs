@@ -40,8 +40,8 @@ fn main() {
         development_seed: Some(TEST_SEED),
     }
     .sign(&image)
-    .unwrap_or_else(|error| {
-        eprintln!("{error}");
+    .unwrap_or_else(|_error| {
+        eprintln!("failed to sign application package");
         process::exit(2);
     });
     let mut package = Vec::with_capacity(HEADER_LEN as usize + image.len());
