@@ -111,10 +111,12 @@ pub mod memory_pressure;
 mod mouse;
 mod network;
 mod notifications;
+mod dma;
 #[cfg(any(
     not(feature = "qemu-test"),
     feature = "stage13-12-test",
-    feature = "stage13-3-test"
+    feature = "stage13-3-test",
+    feature = "stage13-14-test"
 ))]
 mod nvme;
 mod page_cache;
@@ -266,6 +268,12 @@ mod wifi_crypto;
 mod wifi_firmware;
 #[cfg(feature = "stage13-9-test")]
 mod wifi_gtk;
+#[cfg(any(
+    feature = "stage13-9-test",
+    feature = "physical-wifi",
+    feature = "m5-dma-test"
+))]
+mod dma;
 #[cfg(any(feature = "stage13-9-test", feature = "physical-wifi"))]
 mod wifi_hw;
 #[cfg(feature = "stage13-9-test")]
@@ -1993,6 +2001,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // Storage, USB and audio controllers: bound through the driver
         // manager; a missing or failing device never stops the boot.
         let driver_report = drivers::bring_up();
+
+        #[cfg(feature = "m5-dma-test")]
+        {
+            if !dma::self_test() {
+                qemu_test_exit_failure();
+            }
+            qemu_test_exit_success();
+        }
 
         #[cfg(feature = "stage31-driver-restart-test")]
         {
@@ -7324,7 +7340,8 @@ fn stage27_5_recovery_self_test(image: &[u8]) -> bool {
     feature = "qemu-test",
     feature = "woven-init-failure-test",
     feature = "stage31-service-supervisor-test",
-    feature = "stage31-driver-restart-test"
+    feature = "stage31-driver-restart-test",
+    feature = "m5-dma-test"
 ))]
 pub(crate) fn qemu_test_exit_success() {
     unsafe {
@@ -7343,7 +7360,8 @@ pub(crate) fn qemu_test_exit_success() {
 #[cfg(any(
     feature = "qemu-test",
     feature = "stage31-service-supervisor-test",
-    feature = "stage31-driver-restart-test"
+    feature = "stage31-driver-restart-test",
+    feature = "m5-dma-test"
 ))]
 fn qemu_test_exit_failure() -> ! {
     // QEMU isa-debug-exit maps value 0x11 to host exit status 35. This keeps

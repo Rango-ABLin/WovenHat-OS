@@ -1,0 +1,77 @@
+{
+  "schema": 1,
+  "purpose": "Machine-readable M5 hardware-driver qualification summary; not a certification claim.",
+  "status": "M5_COMPLETED_KERNEL_ACCEPTS",
+  "date": "2026-11-20",
+  "branch": "m5/hardware-qualification",
+  "head": "5ca5b9b3",
+  "baseline": "10740a4f",
+  "acceptance_gate": {
+    "qemu_supported_device_cpu_counts": [1, 2, 4],
+    "physical_allowed_status": "BLOCKED",
+    "physical_status": "PHYSICAL_NOT_TESTED"
+  },
+  "implemented_slices": [
+    "shared_dma_page_checked_ownership",
+    "file_mmap_self_test_ordering_fix",
+    "nvme_shared_dma_page",
+    "ahci_shared_dma_page_transfer_ownership",
+    "pci_msi_interrupt_hardening"
+  ],
+  "gates": [
+    {
+      "id": "m5_dma",
+      "backend": "qemu",
+      "cpu_counts": [1, 2, 4],
+      "ram_mib": 4096,
+      "status": "EMULATED_PASS",
+      "marker": "[M5 DMA] shared DMA ownership: PASSED",
+      "exit_code": 33
+    },
+    {
+      "id": "stage13_12_drivers_devices",
+      "backend": "qemu",
+      "cpu_count": 1,
+      "status": "EMULATED_PASS",
+      "exit_code": 33
+    },
+    {
+      "id": "stage13_13_usb_input",
+      "backend": "qemu",
+      "cpu_count": 1,
+      "status": "EMULATED_PASS",
+      "exit_code": 33
+    },
+    {
+      "id": "stage13_14_storage_nvme",
+      "backend": "qemu",
+      "cpu_count": 1,
+      "status": "EMULATED_PASS",
+      "exit_code": 33
+    },
+    {
+      "id": "stage13_14_storage_ahci",
+      "backend": "qemu",
+      "cpu_counts": [1, 2, 4],
+      "status": "EMULATED_PASS",
+      "exit_code": 33
+    }
+  ],
+  "blockers": [
+    "physical_hardware_not_available",
+    "iommu_vtd_missing",
+    "interrupt_storm_protection_open",
+    "msi_runtime_delivery_coverage_open",
+    "msi_x_runtime_table_write_coverage_open",
+    "capability_malformed_list_coverage_open",
+    "bridge_topology_qemu_coverage_open"
+  ],
+  "physical_status": "BLOCKED",
+  "milestone_status": "INCOMPLETE",
+  "next_prerequisites": [
+    "complete_pci_msi_hardening_gaps",
+    "finish_remaining_qemu_gates",
+    "run_physical_qualification",
+    "finalize_release_readiness"
+  ]
+}

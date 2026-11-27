@@ -12,22 +12,25 @@ use core::{
 
 use crate::{
     block::{BlockDevice, Error, SECTOR_SIZE},
+    dma::DmaPage,
     hal::pci::{self, Address, BarKind},
     irq_lock::IrqMutex as Mutex,
-    memory, paging,
+    paging,
 };
 
 const NVME_CLASS: u8 = 0x01;
 const NVME_SUBCLASS: u8 = 0x08;
 const NVME_PROG_IF: u8 = 0x02;
 const QUEUE_DEPTH: u16 = 16;
-const PAGE_SIZE: usize = 4096;
 const ADMIN_IDENTIFY: u8 = 0x06;
 const ADMIN_CREATE_IO_CQ: u8 = 0x05;
 const ADMIN_CREATE_IO_SQ: u8 = 0x01;
 const IO_FLUSH: u8 = 0x00;
 const IO_WRITE: u8 = 0x01;
 const IO_READ: u8 = 0x02;
+const NVME_IO_FLUSH: u8 = 0x00;
+const NVME_IO_WRITE: u8 = 0x01;
+const NVME_IO_READ: u8 = 0x02;
 const READY_POLL_LIMIT: usize = 2_000_000;
 const COMPLETION_POLL_LIMIT: usize = 2_000_000;
 
@@ -44,52 +47,6 @@ pub enum InitError {
     ControllerTimeout,
     CommandFailed,
     IoQueueFailed,
-}
-
-struct DmaPage {
-    physical: u64,
-    virtual_address: u64,
-}
-
-impl Drop for DmaPage {
-    fn drop(&mut self) {
-        if let Ok(frame) = x86_64::structures::paging::PhysFrame::from_start_address(
-            x86_64::PhysAddr::new(self.physical),
-        ) {
-            // The page is no longer exposed to the controller when its owner
-            // is dropped.  Releasing it here makes every failed initialization
-            // path bounded and recoverable instead of leaking DMA memory.
-            let _ = memory::deallocate_frame(frame);
-        }
-    }
-}
-
-impl DmaPage {
-    fn allocate_zeroed() -> Option<Self> {
-        let frame = memory::allocate_contiguous_frames(1)?;
-        let physical = frame.start_address().as_u64();
-        let Some(offset) = paging::physical_memory_offset() else {
-            let _ = memory::deallocate_frame(frame);
-            return None;
-        };
-        let Some(virtual_address) = offset.checked_add(physical) else {
-            let _ = memory::deallocate_frame(frame);
-            return None;
-        };
-        // SAFETY: The frame is exclusively owned by this DMA page and is
-        // reachable through the bootloader's direct physical-memory mapping.
-        unsafe { ptr::write_bytes(virtual_address as *mut u8, 0, PAGE_SIZE) };
-        Some(Self {
-            physical,
-            virtual_address,
-        })
-    }
-
-    fn bytes_mut(&mut self) -> &mut [u8; PAGE_SIZE] {
-        // SAFETY: DmaPage owns the frame and Queue access is serialized by the
-        // controller lock, so no competing Rust reference is created.
-        unsafe { &mut *(self.virtual_address as *mut [u8; PAGE_SIZE]) }
-    }
 }
 
 struct Queue {
@@ -221,14 +178,16 @@ impl NvmeController {
         mmio_write32(registers + 0x14, cc & !1)?;
         wait_ready(registers, false)?;
 
-        let admin_sq = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
-        let admin_cq = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
+        let admin_sq = DmaPage::allocate_zeroed().map_err(|_| InitError::DmaUnavailable)?;
+        let admin_cq = DmaPage::allocate_zeroed().map_err(|_| InitError::DmaUnavailable)?;
+        let admin_sq_address = admin_sq.physical_address();
+        let admin_cq_address = admin_cq.physical_address();
         mmio_write32(
             registers + 0x24,
             (u32::from(depth - 1) << 16) | u32::from(depth - 1),
         )?;
-        mmio_write64(registers + 0x28, admin_sq.physical)?;
-        mmio_write64(registers + 0x30, admin_cq.physical)?;
+        mmio_write64(registers + 0x28, admin_sq_address)?;
+        mmio_write64(registers + 0x30, admin_cq_address)?;
 
         // IOSQES=6 (64 bytes), IOCQES=4 (16 bytes), MPS=0 (4 KiB), EN=1.
         mmio_write32(registers + 0x14, (6 << 16) | (4 << 20) | 1)?;
@@ -241,15 +200,16 @@ impl NvmeController {
             registers + 0x1000,
             registers + 0x1000 + stride,
         );
-        let mut identify = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
-        admin.command(ADMIN_IDENTIFY, 0, identify.physical, 1, 0, 0)?;
+        let mut identify = DmaPage::allocate_zeroed().map_err(|_| InitError::DmaUnavailable)?;
+        let identify_address = identify.physical_address();
+        admin.command(ADMIN_IDENTIFY, 0, identify_address, 1, 0, 0)?;
         let namespace_count = read_u32(identify.bytes_mut(), 516);
         if namespace_count == 0 {
             return Err(InitError::UnsupportedNamespace);
         }
 
         identify.bytes_mut().fill(0);
-        admin.command(ADMIN_IDENTIFY, 1, identify.physical, 0, 0, 0)?;
+        admin.command(ADMIN_IDENTIFY, 1, identify_address, 0, 0, 0)?;
         let namespace_size = read_u64(identify.bytes_mut(), 0);
         let flbas = identify.bytes_mut()[26] & 0x0f;
         let lbaf_offset = 128 + usize::from(flbas) * 4;
@@ -258,13 +218,15 @@ impl NvmeController {
             return Err(InitError::UnsupportedNamespace);
         }
 
-        let io_sq = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
-        let io_cq = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
+        let io_sq = DmaPage::allocate_zeroed().map_err(|_| InitError::DmaUnavailable)?;
+        let io_cq = DmaPage::allocate_zeroed().map_err(|_| InitError::DmaUnavailable)?;
+        let io_sq_address = io_sq.physical_address();
+        let io_cq_address = io_cq.physical_address();
         admin
             .command(
                 ADMIN_CREATE_IO_CQ,
                 0,
-                io_cq.physical,
+                io_cq_address,
                 (u32::from(depth - 1) << 16) | 1,
                 1,
                 0,
@@ -274,7 +236,7 @@ impl NvmeController {
             .command(
                 ADMIN_CREATE_IO_SQ,
                 0,
-                io_sq.physical,
+                io_sq_address,
                 (u32::from(depth - 1) << 16) | 1,
                 (1 << 16) | 1,
                 0,
@@ -288,7 +250,7 @@ impl NvmeController {
             registers + 0x1000 + 2 * stride,
             registers + 0x1000 + 3 * stride,
         );
-        let transfer = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
+        let transfer = DmaPage::allocate_zeroed().map_err(|_| InitError::DmaUnavailable)?;
         rollback.enabled = false;
         Ok(Self {
             address,
@@ -308,24 +270,26 @@ impl NvmeController {
         if !lba_in_range(lba, self.sectors) {
             return Err(Error::OutOfBounds);
         }
+        let opcode = if write { NVME_IO_WRITE } else { NVME_IO_READ };
+        let nsid = self.namespace_id;
+        let prp1 = self.transfer.physical_address();
         if write {
-            self.transfer.bytes_mut()[..SECTOR_SIZE].copy_from_slice(sector);
+            self.transfer
+                .bytes_mut()[..SECTOR_SIZE]
+                .copy_from_slice(sector);
             fence(Ordering::Release);
         }
-        self.io
-            .command(
-                if write { IO_WRITE } else { IO_READ },
-                self.namespace_id,
-                self.transfer.physical,
-                lba as u32,
-                (lba >> 32) as u32,
-                0,
-            )
-            .map_err(|_| Error::DeviceFault)?;
-        fence(Ordering::Acquire);
-        if !write {
+        let result = self
+            .io
+            .command(opcode, nsid, prp1, lba as u32, (lba >> 32) as u32, 0)
+            .map_err(|_| Error::DeviceFault);
+        if result.is_ok() && !write {
+            fence(Ordering::Acquire);
+        }
+        if result.is_ok() && !write {
             sector.copy_from_slice(&self.transfer.bytes_mut()[..SECTOR_SIZE]);
         }
+        result?;
         Ok(())
     }
 
@@ -374,8 +338,9 @@ impl BlockDevice for NvmeController {
     }
 
     fn flush(&mut self) -> Result<(), Error> {
+        let nsid = self.namespace_id;
         self.io
-            .command(IO_FLUSH, self.namespace_id, 0, 0, 0, 0)
+            .command(IO_FLUSH, nsid, 0, 0, 0, 0)
             .map_err(|_| Error::DeviceFault)
     }
 

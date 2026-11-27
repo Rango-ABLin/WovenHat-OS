@@ -326,6 +326,100 @@ pub fn disable_msi(device: Device) -> Result<(), MsiError> {
     Ok(())
 }
 
+/// MSI device interrupts delivered through the local APIC are acknowledged by
+/// the LAPIC EOI written from the IDT handler (`interrupts`/`smp::eoi()`), not
+/// by PCI config/MMIO from a worker context. This hook remains for callers
+/// that want an explicit MSI-level acknowledgement point.
+pub fn ack_msi(_lease: MsiLease) {}
+
+/// Mask the owned device's MSI vector so the controller cannot raise it
+/// while the interrupt is being serviced.
+pub fn mask_owned_msi(lease: MsiLease) -> bool {
+    let Some((snapshot, device)) = super::function_device(lease.function) else {
+        return false;
+    };
+    if snapshot.owner != Some(lease.vector.owner) {
+        return false;
+    }
+    let capability = match msi_capability(device) {
+        Ok(capability) => capability,
+        Err(_) => return false,
+    };
+    let address = Address {
+        segment: device.segment,
+        bus: device.bus,
+        device: device.device,
+        function: device.function,
+    };
+    let _guard = CONFIG_LOCK.lock();
+    let Some(header) = read_config_unlocked(address, capability.offset) else {
+        return false;
+    };
+    if !capability.per_vector_masking {
+        // This driver only programs one message, so the capability-level
+        // enable bit is the only mask available. Disabling the enable bit
+        // is the strongest available masking; it is restored on unmask.
+        let control = ((header >> 16) as u16) & !PCI_MSI_ENABLE;
+        let new_header = (header & 0x0000_ffff) | (u32::from(control) << 16);
+        if !write_config_unlocked(address, capability.offset, new_header) {
+            return false;
+        }
+        return true;
+    }
+    let mask_offset = capability.offset + 0x14;
+    let Some(mut mask) = read_config_unlocked(address, mask_offset) else {
+        return false;
+    };
+    mask |= 1_u32 << (u32::from(lease.vector.vector) % 32);
+    if !write_config_unlocked(address, mask_offset, mask) {
+        return false;
+    }
+    read_config_unlocked(address, mask_offset) == Some(mask)
+}
+
+/// Unmask the owned device's MSI vector after the interrupt is serviced.
+/// Returns false if the write failed; callers retain the lease when this
+/// happens so the driver can retry.
+pub fn unmask_owned_msi(lease: MsiLease) -> bool {
+    let Some((snapshot, device)) = super::function_device(lease.function) else {
+        return false;
+    };
+    if snapshot.owner != Some(lease.vector.owner) {
+        return false;
+    }
+    let capability = match msi_capability(device) {
+        Ok(capability) => capability,
+        Err(_) => return false,
+    };
+    let address = Address {
+        segment: device.segment,
+        bus: device.bus,
+        device: device.device,
+        function: device.function,
+    };
+    let _guard = CONFIG_LOCK.lock();
+    let Some(header) = read_config_unlocked(address, capability.offset) else {
+        return false;
+    };
+    if !capability.per_vector_masking {
+        let control = ((header >> 16) as u16) | PCI_MSI_ENABLE;
+        let new_header = (header & 0x0000_ffff) | (u32::from(control) << 16);
+        if !write_config_unlocked(address, capability.offset, new_header) {
+            return false;
+        }
+        return true;
+    }
+    let mask_offset = capability.offset + 0x14;
+    let Some(mut mask) = read_config_unlocked(address, mask_offset) else {
+        return false;
+    };
+    mask &= !(1_u32 << (u32::from(lease.vector.vector) % 32));
+    if !write_config_unlocked(address, mask_offset, mask) {
+        return false;
+    }
+    read_config_unlocked(address, mask_offset) == Some(mask)
+}
+
 /// Pure acceptance test for x86 MSI encoding. Physical configuration-space
 /// writes are intentionally deferred until a real supported PCI function is
 /// explicitly bound by the Wi-Fi transport.
