@@ -745,7 +745,7 @@ use painter::Painter;
 const START_LABEL: &str = "Start";
 const START_BUTTON_WIDTH: i32 = 58;
 const START_ICON_SIZE: i32 = 14;
-const TASKBAR_ENTRY_GAP: i32 = 4;
+const TASKBAR_ENTRY_GAP: i32 = 2;
 
 /// Bounded WovenStart menu. It stays above the bottom taskbar instead of
 /// becoming a full-screen workspace/Activities overview.
@@ -1868,10 +1868,10 @@ impl Desktop {
                     };
                     draw_app_icon(
                         canvas,
-                        area.x + 2,
-                        area.y + 1,
+                        area.x + (area.width - 20) / 2,
+                        area.y + (area.height - 20) / 2,
                         app_icon(&window.title[..window.title_length]),
-                        14,
+                        20,
                         minimized,
                     );
                 }
@@ -1893,10 +1893,10 @@ impl Desktop {
                     }
                     draw_app_icon(
                         canvas,
-                        area.x + 2,
-                        area.y + 1,
+                        area.x + (area.width - 20) / 2,
+                        area.y + (area.height - 20) / 2,
                         app_icon(app.name()),
-                        14,
+                        20,
                         false,
                     );
                 }

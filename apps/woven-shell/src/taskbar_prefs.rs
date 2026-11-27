@@ -45,12 +45,12 @@ impl IconSize {
         }
     }
 
-    /// Width of one application entry. `Medium` is the accepted 48 px entry.
+    /// Width of one icon-only application entry.
     pub const fn entry_width(self) -> i32 {
         match self {
-            Self::Small => 40,
-            Self::Medium => 48,
-            Self::Large => 56,
+            Self::Small => 32,
+            Self::Medium => 40,
+            Self::Large => 48,
         }
     }
 }
