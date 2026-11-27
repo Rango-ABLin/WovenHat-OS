@@ -92,18 +92,8 @@ def validate(report: Any) -> list[str]:
         evidence = _text(item.get("evidence"))
         if not evidence:
             errors.append(f"{prefix}.evidence is required")
-        else:
-            posix_evidence = PurePosixPath(evidence)
-            windows_evidence = PureWindowsPath(evidence)
-            if (
-                posix_evidence.is_absolute()
-                or windows_evidence.is_absolute()
-                or windows_evidence.drive
-                or windows_evidence.root
-                or ".." in posix_evidence.parts
-                or ".." in windows_evidence.parts
-            ):
-                errors.append(f"{prefix}.evidence must be a repository-relative path")
+        elif not _repository_relative_evidence_path(evidence):
+            errors.append(f"{prefix}.evidence must be a repository-relative path")
         if item.get("tier") == "tier1" and not (
             item.get("environment") == "native" and item.get("result") == "passed"
         ):

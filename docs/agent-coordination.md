@@ -1,3 +1,18 @@
+## OpenCode - Stage 29 hardware qualification Z1/Z2 (2026-11-27) - DONE (Z3 BLOCKED)
+
+Took the read-only hardware-qualification bit. Repaired the `physical-probe`
+feature lint by giving the two halt-ending probe entry points unit return types
+without adding lint suppressions; `physical-probe` and `physical-wifi` feature
+checks, all-target Clippy, fmt and workspace tests pass. QEMU inventory smoke
+PASSES at 1/2/4 CPUs with preserved artifacts. Also fixed
+`qualify-hardware-report.py` to route evidence validation through its existing
+fail-closed path helper (18/18 hardware tooling tests pass, including the NUL
+path case). Z1 preflight/host/TPM and Z2 matrix/classifier are complete and
+remain Tier 2; Z3 native work needs elevation, a spare non-boot device and
+signed destructive authorization. Evidence and limits are in
+`docs/audit-stage29-hardware-qualification-2026-11-27.md`. Do not relabel any
+QEMU result as native evidence.
+
 ## OpenCode - read-only OS gap analysis (2026-11-27) - ACTIVE
 
 Analyzing current `master` at `b1035496` for a gap report only; no source edits

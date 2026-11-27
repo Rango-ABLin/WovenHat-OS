@@ -1,5 +1,24 @@
 # Stage status
 
+## Stage 29 hardware qualification Z1/Z2 - 2026-11-27 - ACCEPTED (Z3 BLOCKED)
+
+The read-only Z1/Z2 hardware-qualification bit is complete. Two real defects
+were fixed without weakening tests: the `physical-probe` halt entry points no
+longer make the remaining boot path unreachable to warning-denying lints, and
+`qualify-hardware-report.py` now enforces its fail-closed evidence-path helper
+on both Linux and Windows hosts.
+
+Validation: warning-denying `physical-probe` target Clippy passes; all-target
+Clippy, fmt and workspace tests pass; `test-physical-probe.py` passes at 1/2/4
+CPUs with preserved serial/QMP/screenshot evidence; hardware qualification and
+preflight tooling tests pass (18/18 plus the preflight suite); the conservative
+classifier reports valid Tier 2 with 17 blocked native categories. Z1 host
+inventory remains non-elevated with no visible TPM and zero USB targets. Native
+Z3 qualification is still blocked pending elevation, an owner-selected spare
+non-boot device and signed destructive authorization. No QEMU result was
+promoted to native evidence and no Tier 1 claim is made. Record:
+`docs/audit-stage29-hardware-qualification-2026-11-27.md`.
+
 ## Phase B/master reconciliation - 2026-11-27 - MERGE RESOLUTION
 
 Phase B desktop/taskbar, USB, release and installed-settings behavior was

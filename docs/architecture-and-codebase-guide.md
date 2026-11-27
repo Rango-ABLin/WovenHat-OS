@@ -3516,7 +3516,9 @@ details to the framebuffer and serial, and halts. It does not enter driver
 activation, storage/network runtime, AP startup or candidate QEMU tests. No
 device configuration or MMIO register writes are added by this mode; PCI
 configuration reads use the existing ECAM/legacy address-selection access.
-It is an inventory aid and never radio acceptance. See the
+It is an inventory aid and never radio acceptance. The probe functions halt
+the machine but return unit to Rust so normal boot code after the call remains
+type-reachable for warning-denying stage-feature lints. See the
 [AX201 machine audit](audit-ax201-machine-2026-09-24.md).
 
 ## AX201 integrated 22000 activation boundary (2026-10-17)
