@@ -5601,9 +5601,12 @@ fn main(args: Args) -> ! {
     // SAFETY: the only reference to the tile buffer, taken once.
     let tile = unsafe { &mut *TILE.0.get() };
 
+    log(&[b"woven-shell: compositor claim begin"]);
     if libwoven::compositor_claim().is_err() {
+        log(&[b"woven-shell: compositor claim failed"]);
         fail(2);
     }
+    log(&[b"woven-shell: compositor claim complete"]);
     let mut info = match libwoven::compositor_info() {
         Ok(info) => info,
         Err(_) => fail(3),

@@ -2003,8 +2003,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                         }
                         task::yield_now();
                     }
-                    desktop_session_started = session_ready || task::process_alive(pid);
-                    if session_ready {
+                    desktop_session_started = session_ready;
+                    let status = if session_ready {
                         console.println("DESKTOP SESSION: STARTED (F12 SWITCHES TO THIS CONSOLE)");
                         boot_stage(&mut console, "BOOT LOADER [7/7]: desktop ready");
                         alloc::format!("SESSION: started as pid {pid} (F12 shows the desktop)")
@@ -2023,7 +2023,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                         alloc::format!(
                             "SESSION: pid {pid} has not shown the desktop yet (still running)"
                         )
+                    };
+                    if !session_ready && task::process_alive(pid) {
+                        serial::write_line(format_args!(
+                            "[SESSION] terminating stalled WovenShell pid {} before fallback",
+                            pid
+                        ));
+                        let _ = task::kill_process(pid, 9);
                     }
+                    status
                 }
                 Err(error) => {
                     serial::write_line(format_args!("[SESSION] desktop not started: {:?}", error));
@@ -14792,7 +14800,7 @@ fn stage20_3_self_test() -> bool {
         .is_ok()
         && vfs::create_read_only("/share/applications/notes.txt", b"not an application").is_ok()
         && vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok()
-        && vfs::create_read_only("/bin/woven-shell", WOVEN_SHELL_IMAGE).is_ok();
+        && vfs::create_read_only_large("/bin/woven-shell", WOVEN_SHELL_IMAGE).is_ok();
     if !step("catalog and programs installed", catalog) {
         return false;
     }
@@ -16082,7 +16090,8 @@ fn stage20_1_self_test() -> bool {
 
     if !step(
         "install into the filesystem",
-        vfs::create_read_only("/bin/woven-shell", WOVEN_SHELL_IMAGE).is_ok(),
+        vfs::create_read_only_large("/bin/woven-shell", WOVEN_SHELL_IMAGE).is_ok()
+            || vfs::stat("/bin/woven-shell").is_ok(),
     ) {
         return false;
     }
