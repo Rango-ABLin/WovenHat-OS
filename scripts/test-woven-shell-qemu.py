@@ -47,6 +47,49 @@ def app_build_env(app_dir):
     return env
 
 
+def vfs_node_capacity(config_path: Path) -> int:
+    """Read the real VFS per-file limit rather than maintaining a stale copy."""
+    source = config_path.read_text(encoding='utf-8')
+    match = re.search(
+        r'^\\s*pub const VFS_NODE_CAPACITY:\\s*usize\\s*=\\s*(\\d+)\\s*(?:\\*\\s*(\\d+))?\\s*;',
+        source, re.MULTILINE,
+    )
+    if match is None:
+        raise ValueError(f'cannot parse VFS_NODE_CAPACITY in {config_path}')
+    capacity = int(match.group(1)) * int(match.group(2) or 1)
+    if capacity <= 0:
+        raise ValueError(f'invalid VFS_NODE_CAPACITY in {config_path}')
+    return capacity
+
+
+def shell_image_size_error(size: int, capacity: int) -> str | None:
+    """A VFS insert would fail if the shell ELF exceeds its node capacity."""
+    if size <= 0:
+        return f'WovenShell ELF is empty ({size} bytes)'
+    if size > capacity:
+        return (
+            f'WovenShell ELF is {size} bytes, exceeding VFS_NODE_CAPACITY '
+            f'({capacity} bytes); the guest would fail to install /bin/woven-shell. '
+            'Reduce the image or design a reviewed file-storage change; '
+            'do not weaken the acceptance gate.'
+        )
+    return None
+
+
+def validate_shell_image(image: Path, config_path: Path) -> bool:
+    try:
+        capacity = vfs_node_capacity(config_path)
+        size = image.stat().st_size
+    except (OSError, ValueError) as error:
+        print(f'FAILED: WovenShell image preflight: {error}', file=sys.stderr)
+        return False
+    error = shell_image_size_error(size, capacity)
+    if error:
+        print(f'FAILED: {error}', file=sys.stderr)
+        return False
+    return True
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--qemu',default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
@@ -63,6 +106,8 @@ def main():
     app_dir=root/'apps'/'woven-shell'
     if subprocess.run(['cargo','build','--release'],cwd=app_dir,env=app_build_env(app_dir)).returncode: return 1
     image=app_dir/'target'/'x86_64-unknown-none'/'release'/APP
+    if not validate_shell_image(image, root/'kernel'/'src'/'config.rs'):
+        return 1
     env=dict(os.environ)
     env['WOVENHAT_SHELL_IMAGE']=str(image)
     if a.stage in ('24.59', 'phase-e-missing'):
