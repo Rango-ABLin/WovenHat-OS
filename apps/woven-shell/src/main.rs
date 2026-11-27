@@ -30,6 +30,11 @@
 //! - `WPBT`, button (u8), pressed (u8), x (u16), y (u16): report a bounded
 //!   client button edge in client coordinates.
 //! - `WCAP`, version (u8 = 1): opt the sender's open window into cancellation.
+//! - `WKV2`, version (u8 = 1): opt into the versioned `WKEY2` key protocol.
+//!   Only opted-in windows receive `WKEY2`, key code and optional ASCII byte.
+//! - `WREQ`, action (u8), optional payload: a bounded window-manager request
+//!   from an opted-in owner. `SET_TITLE` carries up to 24 title bytes; `FOCUS`
+//!   raises the sender's window. Both are authenticated against its surface.
 //! - `WCAN`: cancel an opted-in client's pointer actions before a synthetic
 //!   `WPBT` release when locking or leaving a workspace. Legacy clients get
 //!   only the established release message.
@@ -146,7 +151,9 @@ use libwoven::design_system::{SemanticPalette, TypeRole};
 use libwoven::graphics::{
     Camera, Color, DepthBuffer, Rect, Renderer, Vertex3, Vertex3Field, Vertex3Tex,
 };
+use libwoven::gui_protocol;
 use libwoven::layout::{self, Frame};
+use libwoven::semantic_search;
 use libwoven::ui::DesignTokens;
 use libwoven::{
     blend, font, process, rgb, wait, Args, Canvas, DateTime, FrameEvent, GraphicsSurface,
@@ -168,6 +175,23 @@ use textures::{CENTER_TEXTURE, QS_PANEL_TEXTURE, TILE, TILE_DEPTH_3D, TOAST_TEXT
 /// time, so a missing package simply leaves the shortcut inert.
 const DESKTOP_ICON_NAMES: [&str; 3] = ["WovenFiles", "WovenTerminal", "WovenStore"];
 const DESKTOP_ICON_LABELS: [&str; 3] = ["Files", "Terminal", "Store"];
+
+/// Application ids used by the bounded `woven.search` service, in that
+/// service's own order. The launcher sorts its catalog by name, so ids must
+/// never be used directly as grid indices.
+const SEARCH_APP_NAMES: [&[u8]; 11] = [
+    b"WovenCalculator",
+    b"WovenTerminal",
+    b"WovenFiles",
+    b"WovenMonitor",
+    b"WovenSettings",
+    b"WovenSecurity",
+    b"WovenEditor",
+    b"WovenImages",
+    b"WovenUpdate",
+    b"WovenStore",
+    b"WovenInstaller",
+];
 const DESKTOP_ICON_X: i32 = 24;
 const DESKTOP_ICON_Y: i32 = 52;
 const DESKTOP_ICON_STEP: i32 = 76;
@@ -180,7 +204,7 @@ use status::{BatteryStatus, NetworkStatus, StatusSnapshot, VolumeStatus};
 mod taskbar_prefs;
 use taskbar_prefs::{Alignment, AutoHide, IconSize, TaskbarPrefs, AUTO_HIDE_HOLD};
 mod pinned_apps;
-use pinned_apps::{PinnedApps, PinError, MAX_PINNED as PIN_CAP};
+use pinned_apps::{PinError, PinnedApps, MAX_PINNED as PIN_CAP};
 
 /// One taskbar group entry: a window on the current workspace, or a pinned
 /// catalog app that is not running on it. A pinned app with a running window
@@ -795,6 +819,10 @@ struct Desktop {
     overview_detail: bool,
     query: [u8; MAX_QUERY],
     query_length: usize,
+    /// Bounded hit list from the semantic search service, mapped to catalog
+    /// indices. Empty means the service was unavailable or the query is empty.
+    semantic_indices: [usize; MAX_APPS],
+    semantic_count: usize,
     selected: usize,
     children: [Option<Child>; MAX_CHILDREN],
 }
@@ -869,6 +897,8 @@ impl Desktop {
         overview_detail: false,
         query: [0; MAX_QUERY],
         query_length: 0,
+        semantic_indices: [0; MAX_APPS],
+        semantic_count: 0,
         selected: 0,
         children: [None; MAX_CHILDREN],
     };
@@ -956,10 +986,76 @@ impl Desktop {
         Area::new(self.pointer.0, self.pointer.1, CURSOR_WIDTH, CURSOR_HEIGHT)
     }
 
+    /// Ask the bounded `woven.search` broker for application hits and cache
+    /// them as catalog indices. A missing service or malformed reply simply
+    /// leaves the semantic list empty so `filtered` keeps the local fallback.
+    /// Service ids are its own catalog order, not the launcher's alphabetical
+    /// grid order, so each hit is resolved by its application name.
+    fn refresh_semantic_search(&mut self) {
+        self.semantic_count = 0;
+        if self.query_length == 0 {
+            return;
+        }
+        let Ok(query) = core::str::from_utf8(&self.query[..self.query_length]) else {
+            return;
+        };
+        let Ok(reply) = libwoven::search(query, 1) else {
+            return;
+        };
+        for hit in
+            reply.hits[..reply.hit_count.min(semantic_search::MAX_HITS as u8) as usize].iter()
+        {
+            if hit.kind != semantic_search::Kind::Application {
+                continue;
+            }
+            let Some(name) = hit
+                .id
+                .checked_sub(1)
+                .and_then(|id| SEARCH_APP_NAMES.get(id as usize))
+            else {
+                continue;
+            };
+            let Some(index) = self.apps[..self.app_count]
+                .iter()
+                .position(|app| app.is_some_and(|app| app.name() == *name))
+            else {
+                continue;
+            };
+            if self.semantic_count < MAX_APPS
+                && !self.semantic_indices[..self.semantic_count].contains(&index)
+            {
+                self.semantic_indices[self.semantic_count] = index;
+                self.semantic_count += 1;
+            }
+        }
+        // Preserve the launcher's established catalog order: the service
+        // ranks by score, but keyboard/pointer acceptance expects the same
+        // grid position a substring filter would have produced.
+        for outer in 1..self.semantic_count {
+            let mut cursor = outer;
+            while cursor > 0 && self.semantic_indices[cursor] < self.semantic_indices[cursor - 1] {
+                self.semantic_indices.swap(cursor, cursor - 1);
+                cursor -= 1;
+            }
+        }
+        if self.semantic_count > 0 {
+            log(&[b"woven-shell: semantic search hits"]);
+        }
+    }
+
     /// Catalog indices matching the query, in catalog order.
     fn filtered(&self) -> ([usize; MAX_APPS], usize) {
         let mut found = [0; MAX_APPS];
         let mut count = 0;
+        if self.semantic_count > 0 {
+            for &index in &self.semantic_indices[..self.semantic_count] {
+                if self.apps[index].is_some() && count < MAX_APPS {
+                    found[count] = index;
+                    count += 1;
+                }
+            }
+            return (found, count);
+        }
         let query = &self.query[..self.query_length];
         for (index, app) in self.apps[..self.app_count].iter().enumerate() {
             if app.is_some_and(|app| matches(app.name(), query)) {
@@ -1198,6 +1294,7 @@ impl Desktop {
         self.launcher_open = !self.launcher_open;
         self.overview_detail = !self.launcher_open;
         self.query_length = 0;
+        self.semantic_count = 0;
         self.selected = 0;
         // A close must restore every pixel under the projected card. The
         // launcher is a foreground mode switch, so a full recomposition is
@@ -1266,11 +1363,13 @@ impl Desktop {
                     self.query_length += 1;
                 }
                 self.selected = 0;
+                self.refresh_semantic_search();
                 self.log_search_latency();
             }
             Key::Backspace => {
                 self.query_length = self.query_length.saturating_sub(1);
                 self.selected = 0;
+                self.refresh_semantic_search();
                 self.log_search_latency();
             }
             Key::Tab => {
@@ -1720,7 +1819,14 @@ impl Desktop {
                             theme_entry(false)
                         },
                     );
-                    draw_app_icon(canvas, area.x + 2, area.y + 1, app_icon(app.name()), 14, false);
+                    draw_app_icon(
+                        canvas,
+                        area.x + 2,
+                        area.y + 1,
+                        app_icon(app.name()),
+                        14,
+                        false,
+                    );
                     let shown = app
                         .name()
                         .strip_prefix(b"Woven")
@@ -3150,7 +3256,11 @@ impl Desktop {
             QsAction::TaskbarAlign => {
                 // bar with centered/left group indicator
                 canvas.fill_rect(x + 2, y + 14, 16, 3, c);
-                let inner = if active { bg } else { blend(theme_stroke(), theme_panel(), 18) };
+                let inner = if active {
+                    bg
+                } else {
+                    blend(theme_stroke(), theme_panel(), 18)
+                };
                 if self.taskbar.alignment == taskbar_prefs::Alignment::Left {
                     canvas.fill_rect(x + 3, y + 15, 3, 1, inner);
                     canvas.fill_rect(x + 7, y + 15, 3, 1, inner);
@@ -3162,16 +3272,25 @@ impl Desktop {
                 canvas.fill_rect(x + 5, y + 6, 10, 5, inner);
             }
             QsAction::TaskbarIconSize => {
-                let inner = if active { bg } else { blend(theme_stroke(), theme_panel(), 18) };
+                let inner = if active {
+                    bg
+                } else {
+                    blend(theme_stroke(), theme_panel(), 18)
+                };
                 for (dx, size) in [(3i32, 3i32), (8, 4), (14, 5)] {
                     let dy = y + 16 - size;
                     canvas.fill_rect(x + dx, dy, size as usize, size as usize, c);
                     if size > 2 {
-                        canvas.fill_rect(x + dx + 1, dy + 1, (size - 2) as usize, (size - 2) as usize, inner);
+                        canvas.fill_rect(
+                            x + dx + 1,
+                            dy + 1,
+                            (size - 2) as usize,
+                            (size - 2) as usize,
+                            inner,
+                        );
                     }
                 }
             }
-
         }
         let _ = (a, active);
     }
@@ -4294,7 +4413,9 @@ impl Desktop {
             return Area::new(0, 0, 0, 0);
         };
         self.cancel_pointer_gesture();
-        let hidden = self.windows[slot].map(|w| w.footprint()).unwrap_or(Area::new(0, 0, 0, 0));
+        let hidden = self.windows[slot]
+            .map(|w| w.footprint())
+            .unwrap_or(Area::new(0, 0, 0, 0));
         self.stack[position..self.stacked].rotate_left(1);
         self.stacked -= 1;
         let next = self
@@ -4319,7 +4440,9 @@ impl Desktop {
         self.stack[self.stacked] = slot;
         self.stacked += 1;
         log(&[b"woven-shell: window restored"]);
-        let current = self.windows[slot].map(|w| w.footprint()).unwrap_or(Area::new(0, 0, 0, 0));
+        let current = self.windows[slot]
+            .map(|w| w.footprint())
+            .unwrap_or(Area::new(0, 0, 0, 0));
         previous.union(current).union(self.taskbar())
     }
 
@@ -4429,9 +4552,7 @@ impl Desktop {
             Err(PinError::Full) => self.taskbar().union(self.toast_message("Pin list full")),
             Err(PinError::Invalid) => self.taskbar().union(self.toast_message("Cannot pin")),
             // `contains` just said otherwise; report without changing.
-            Err(PinError::Duplicate) => {
-                self.taskbar().union(self.toast_message("Already pinned"))
-            }
+            Err(PinError::Duplicate) => self.taskbar().union(self.toast_message("Already pinned")),
         }
     }
 
@@ -4466,7 +4587,11 @@ impl Desktop {
         };
         log(&[b"woven-shell: ", text.as_bytes()]);
         let toast = self.toast_message(text);
-        let strip = if changed { self.taskbar() } else { Area::new(0, 0, 0, 0) };
+        let strip = if changed {
+            self.taskbar()
+        } else {
+            Area::new(0, 0, 0, 0)
+        };
         strip.union(toast)
     }
 
@@ -4500,6 +4625,7 @@ impl Desktop {
         let mut title = [0u8; MAX_TITLE];
         let title_length = (message.len() - 16).min(MAX_TITLE);
         title[..title_length].copy_from_slice(&message[16..16 + title_length]);
+        let identity = title;
         // Reduced motion: appear at full opacity immediately rather than
         // animate in, matching libwoven::accessibility::Settings's own
         // "duration 0" convention for this preference.
@@ -4516,12 +4642,15 @@ impl Desktop {
             y,
             width,
             height,
+            identity,
+            identity_length: title_length,
             title,
             title_length,
             fade,
             workspace: self.workspace,
             resizing_until: 0,
             cancellation_protocol: false,
+            keyboard_v2: false,
             maximized: false,
             restore: [0; 4],
             surface_w: width,
@@ -4639,7 +4768,7 @@ impl Desktop {
             // can still reflow later by sending another WRSZ.
             log(&[
                 b"woven-shell: window resized (maximized, clamped): ",
-                &window.title[..window.title_length],
+                &window.identity[..window.identity_length],
             ]);
             return before.union(window.footprint());
         }
@@ -4654,7 +4783,7 @@ impl Desktop {
         }
         log(&[
             b"woven-shell: window resized: ",
-            &window.title[..window.title_length],
+            &window.identity[..window.identity_length],
         ]);
         before.union(window.footprint())
     }
@@ -4685,7 +4814,7 @@ impl Desktop {
         }
         log(&[
             b"woven-shell: window closed: ",
-            &window.title[..window.title_length],
+            &window.identity[..window.identity_length],
         ]);
         // The newly focused window's title and shadow change too.
         let next = self
@@ -4712,6 +4841,43 @@ impl Desktop {
                     window.cancellation_protocol = true;
                 }
                 empty
+            }
+            Some(b"WKV2") if message == gui_protocol::OPT_IN => {
+                if let Some(window) = self
+                    .windows
+                    .iter_mut()
+                    .flatten()
+                    .find(|window| window.owner == sender)
+                {
+                    window.keyboard_v2 = true;
+                    log(&[b"woven-shell: keyboard protocol v2 enabled"]);
+                }
+                empty
+            }
+            Some(b"WREQ") => {
+                let Some((action, payload)) = gui_protocol::decode_request(message) else {
+                    return empty;
+                };
+                let Some(index) = self.windows.iter().position(|window| {
+                    window.is_some_and(|window| window.owner == sender && window.keyboard_v2)
+                }) else {
+                    return empty;
+                };
+                match action {
+                    gui_protocol::request::SET_TITLE => {
+                        let Some(window) = self.windows[index].as_mut() else {
+                            return empty;
+                        };
+                        let mut title = [0u8; MAX_TITLE];
+                        let length = label(payload, MAX_TITLE, &mut title);
+                        window.title = title;
+                        window.title_length = length;
+                        log(&[b"woven-shell: window titled: ", &title[..length]]);
+                        Dirty::of(window.title_area())
+                    }
+                    gui_protocol::request::FOCUS => Dirty::of(self.focus(index)),
+                    _ => empty,
+                }
             }
             Some(b"WOPN") => self.open(sender, message),
             Some(b"WRSZ") => Dirty::of(self.resized(sender, message)),
@@ -4748,6 +4914,14 @@ impl Desktop {
             }
             _ => empty,
         }
+    }
+
+    /// Send one versioned key event to a v2 client. The caller has already
+    /// checked that the focused window opted in.
+    fn send_v2_key(&self, owner: process::Id, code: u8, ascii: Option<u8>) {
+        let mut bytes = [0u8; 7];
+        let length = gui_protocol::encode_key(code, ascii, &mut bytes);
+        let _ = libwoven::message_send(owner, &bytes[..length]);
     }
 
     fn handle_input(&mut self, event: InputEvent) -> Area {
@@ -5074,12 +5248,10 @@ impl Desktop {
                     .rev()
                     .copied()
                     .find(|&slot| {
-                        self.windows[slot]
-                            .is_some_and(|window| window.frame().contains(x, y))
+                        self.windows[slot].is_some_and(|window| window.frame().contains(x, y))
                     })
                     .filter(|&slot| {
-                        self.windows[slot]
-                            .is_some_and(|window| window.title_area().contains(x, y))
+                        self.windows[slot].is_some_and(|window| window.title_area().contains(x, y))
                     });
                 if let Some(slot) = title_hit {
                     return self.toggle_maximize(slot);
@@ -5118,6 +5290,12 @@ impl Desktop {
             // Tab is shell-owned outside the sign-in/launcher paths. Cycle
             // the bounded workspace stack without requiring a pointer.
             InputEvent::Key(Key::Tab) => {
+                if let Some(window) = self.focused().and_then(|slot| self.windows[slot]) {
+                    if window.keyboard_v2 {
+                        self.send_v2_key(window.owner, gui_protocol::key::TAB, None);
+                        return empty;
+                    }
+                }
                 self.cancel_pointer_gesture();
                 let panels = self.close_panels();
                 let focused = self.stack[..self.stacked]
@@ -5131,23 +5309,41 @@ impl Desktop {
             InputEvent::Key(Key::F4) => self.move_focused_to_next_workspace(),
             InputEvent::Key(Key::Enter) => {
                 if let Some(window) = self.focused().and_then(|slot| self.windows[slot]) {
-                    let _ =
-                        libwoven::message_send(window.owner, &[b'W', b'K', b'E', b'Y', KEY_ENTER]);
+                    if window.keyboard_v2 {
+                        self.send_v2_key(window.owner, gui_protocol::key::ENTER, None);
+                    } else {
+                        let _ = libwoven::message_send(
+                            window.owner,
+                            &[b'W', b'K', b'E', b'Y', KEY_ENTER],
+                        );
+                    }
                 }
                 empty
             }
             InputEvent::Key(Key::Backspace) => {
                 if let Some(window) = self.focused().and_then(|slot| self.windows[slot]) {
-                    let _ = libwoven::message_send(
-                        window.owner,
-                        &[b'W', b'K', b'E', b'Y', KEY_BACKSPACE],
-                    );
+                    if window.keyboard_v2 {
+                        self.send_v2_key(window.owner, gui_protocol::key::BACKSPACE, None);
+                    } else {
+                        let _ = libwoven::message_send(
+                            window.owner,
+                            &[b'W', b'K', b'E', b'Y', KEY_BACKSPACE],
+                        );
+                    }
                 }
                 empty
             }
             InputEvent::Key(Key::Char(character)) if character.is_ascii() => {
                 if let Some(window) = self.focused().and_then(|slot| self.windows[slot]) {
-                    let _ = libwoven::message_send(window.owner, &[character as u8]);
+                    if window.keyboard_v2 {
+                        self.send_v2_key(
+                            window.owner,
+                            gui_protocol::key::ASCII,
+                            Some(character as u8),
+                        );
+                    } else {
+                        let _ = libwoven::message_send(window.owner, &[character as u8]);
+                    }
                     log(&[b"woven-shell: key forwarded"]);
                 }
                 empty
@@ -5425,11 +5621,7 @@ impl Desktop {
         // Auto-hide: past the hold, the bar goes back down. Panels that hang
         // off the strip (Quick Settings, Notification Center, the overview)
         // hold it up until they close.
-        if self.auto_hide.tick(now)
-            && !self.qs_open
-            && !self.center_open
-            && !self.launcher_open
-        {
+        if self.auto_hide.tick(now) && !self.qs_open && !self.center_open && !self.launcher_open {
             log(&[b"woven-shell: taskbar hidden"]);
             dirty = dirty.union(self.taskbar());
         }

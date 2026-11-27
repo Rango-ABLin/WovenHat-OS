@@ -196,6 +196,23 @@ This fixes a real 640x400 defect where Power, Restart and Lock were painted or
 hit-tested below the visible screen. Stage 20.1 and Stage 20.15 pass at 1/2/4
 CPUs, and Stage 23.1's capability gate passes at 1/2/4 CPUs.
 
+## OpenCode - semantic launcher wiring (2026-11-26)
+
+The shell's Start overview now prefers bounded `woven.search` Application hits
+over its local substring filter, with a fallback when the service is absent.
+A new `libwoven::search` client sends only a UTF-8 query and returns compact
+id/kind/score hits; no path, file content or index mutation crosses IPC, and
+no syscall, capability or ABI change was made. Hits are re-sorted into catalog
+order so the existing keyboard/pointer grid contract is unchanged.
+
+Validation: warning-denying shell target Clippy and workspace checks pass.
+The signed semantic search service and 1-CPU desktop journey reach overview,
+emit `woven-shell: semantic search hits`, and launch WovenFiles correctly.
+The final `keyboard_refresh` framebuffer oracle timed out, but the same timeout
+reproduces on the pre-change commit (`746efcb7`) under identical limits, so it
+is recorded as a pre-existing/environmental harness issue rather than treated
+as a regression or weakened.
+
 ## OpenCode - live installed settings propagation (2026-11-26)
 
 The shell now re-reads the bounded installed settings record on its existing
@@ -207,6 +224,60 @@ the Settings app remains the sole writer and no new IPC topic, capability or
 ABI was introduced. The change is recorded on both `phase-b/bottom-taskbar-core`
 and `feature/app-surfaces` (cherry-picked) because the main worktree was on the
 former when the edit landed.
+
+## OpenCode - versioned shell window protocol v2 (2026-11-26)
+
+Continued `feature/app-surfaces` from `cf921cb6`. A protocol-mapping pass
+confirmed the shell's window messages are raw, bounded, sender-authenticated
+tags with `WCAP` as the established opt-in pattern, and that no shared codec
+existed. Added `libwoven::gui_protocol` with a host-tested codec for an opt-in
+`WKV2\x01`/`WKEY2` key path and `WREQ` window-manager requests (`SET_TITLE`,
+`FOCUS`). The shell sends v2 key events only to opted-in windows; legacy
+clients keep byte-for-byte behavior. Requests are accepted only from the
+window owner and are length-bounded to the existing title cap.
+
+WovenTerminal opts in, gains unambiguous Tab builtin completion, and shows each
+command's bounded result in the title bar. The first resize desktop run failed
+because shell lifecycle logs embedded the mutable title; the shell now keeps
+the opening identity separately so markers remain stable. The desktop harness
+gained positive markers for the v2 opt-in and the title request (the first
+oracle used the wrong typed command and was corrected to the actual bounded
+`hellp` sequence, not weakened).
+
+Validation on exact source: codec tests 4/4, terminal tests 5/5, fmt, workspace
+tests, warning-denying host/kernel Clippy and freestanding app Clippy, signed
+terminal QEMU at 1/2/4 CPUs, 1-CPU desktop acceptance (with v2/title markers),
+resize handshake and legacy Files desktop check all pass. The full serialized
+Stage 10.7 chain passes; evidence is
+`D:\WovenHat-OS-output\protocol-v2-final-gate\audit-artifacts\acceptance-20261126-215854-475`.
+
+## OpenCode - WovenTerminal output history and builtins (2026-11-26)
+
+Continued the app-surface plan with `feature/app-surfaces` at `f49465ec` in an
+isolated worktree. WovenTerminal's GUI now shows a bounded ten-row command
+history with per-row status instead of the static preview; Clear resets input
+and history. Added `pwd`, `cd PATH` and `export NAME=VALUE` to the existing
+parser/executor via new `libwoven` `getcwd`/`chdir` wrappers over the existing
+`GETCWD`, `CHDIR` and `ENV_SET` syscalls — no new syscall, capability, IPC topic
+or ABI change.
+
+The first 1-CPU terminal desktop run failed with "did not open a desktop
+window". The evidence showed the shell launched WovenEditor for the query
+"terminal": the semantic launcher mapped `woven.search` application ids directly
+to its alphabetically sorted catalog indices. Fixed by resolving each
+application hit through the service's id-to-name table and then finding that
+name in the launcher catalog; the service and its probe were not changed. The
+same harness passes after the fix.
+
+Validation on exact source: terminal host tests 4/4, fmt, workspace tests,
+warning-denying workspace/all-target and kernel-target Clippy, freestanding
+Clippy for both changed apps, signed `test-terminal-qemu.py` at 1/2/4 CPUs and
+1-CPU desktop visual acceptance all pass. The full serialized Stage 10.7 chain
+passes on the exact source; evidence is
+`D:\WovenHat-OS-output\terminal-final-gate\audit-artifacts\acceptance-20261126-165145-289`.
+The WovenShell crate was rustfmt-formatted as part of this change; those edits
+are formatting-only. Other owners' uncommitted work in the main worktree was
+not touched.
 
 ## OpenCode - WovenImages bounded viewer (2026-11-26)
 

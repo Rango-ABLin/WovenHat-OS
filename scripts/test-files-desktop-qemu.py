@@ -272,6 +272,16 @@ def main():
                 command_qmp('send-key', {'keys': [{'type': 'qcode', 'data': key}], 'hold-time': 160})
                 time.sleep(0.3)
             time.sleep(2)
+            if args.app == 'terminal':
+                for marker, description in (
+                    ('woven-shell: keyboard protocol v2 enabled', 'v2 keyboard opt-in'),
+                    ('woven-shell: window titled: er hellp', 'window-manager title request'),
+                ):
+                    deadline = time.monotonic() + 15
+                    while marker not in serial.read_text(errors='replace'):
+                        if time.monotonic() >= deadline:
+                            raise RuntimeError(f'{description} marker missing')
+                        time.sleep(0.2)
         capture = out / f'woven-{app[0]}.ppm'
         screendump(capture)
         time.sleep(0.5)

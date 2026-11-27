@@ -365,6 +365,69 @@ decision. Focused host validation: `python -m unittest tests.test_package_releas
 reproducibility-boundary step now runs both suites;
 full release/QEMU acceptance was not rerun
 for this tooling-only change.
+## Versioned shell window protocol v2 - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+Added an opt-in v2 layer to the shell's application window messages without
+changing the existing wire tags or ABI. `WKV2\x01` opts a window into `WKEY2`,
+a uniform key message carrying ASCII, Enter, Backspace or Tab; legacy clients
+keep the original `WKEY`/raw-ASCII path. `WREQ` carries bounded window-manager
+requests (`SET_TITLE` up to 24 bytes, `FOCUS`) authenticated against the
+sender's surface. The codec lives in a host-tested `libwoven::gui_protocol`
+module.
+
+WovenTerminal opts in, completes unambiguous builtins on Tab, and reports each
+command's bounded result in its title bar through `SET_TITLE`. Stable window
+identity from `WOPN` is now kept separately from the displayed title, so
+lifecycle log markers stay bound to the window rather than changing when a
+client updates its title. No syscall, capability, IPC topic or ABI change; the
+shell still authenticates every request as the surface owner.
+
+Validation on exact source: new protocol codec tests 4/4, terminal tests 5/5,
+workspace tests, warning-denying Clippy, signed `test-terminal-qemu.py` at
+1/2/4 CPUs, 1-CPU terminal desktop acceptance including the v2 opt-in and title
+markers, the resize handshake and a legacy Files desktop check all pass. The full
+serialized Stage 10.7 chain also passes; evidence is
+`D:\WovenHat-OS-output\protocol-v2-final-gate\audit-artifacts\acceptance-20261126-215854-475`.
+Native hardware and external release gates remain open.
+
+## WovenTerminal output history and builtins - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+WovenTerminal now renders a bounded ten-row command history/status grid in its
+window instead of a static preview; Clear resets both input and history. `pwd`,
+`cd PATH` and `export NAME=VALUE` were added to the existing parser and
+executor using the already-present `CHDIR`, `GETCWD` and `ENV_SET` syscalls via
+new `libwoven` wrappers. No syscall, capability, IPC topic or ABI change is
+involved.
+
+The 1-CPU per-app desktop harness exposed a real pre-existing launcher defect
+from the semantic-search increment: `woven.search` application ids were used as
+indices into the shell's alphabetically sorted catalog, so querying "terminal"
+launched WovenEditor. Hits are now resolved by application name before being
+placed in the launcher grid; the search service and its probe are unchanged.
+
+Validation on exact source: terminal host tests 4/4, workspace tests,
+warning-denying all-target and kernel-target Clippy, freestanding Clippy for
+WovenTerminal and WovenShell, signed `test-terminal-qemu.py` at 1/2/4 CPUs and
+the 1-CPU terminal desktop visual acceptance all pass. The full serialized
+Stage 10.7 chain also passes; evidence is
+`D:\WovenHat-OS-output\terminal-final-gate\audit-artifacts\acceptance-20261126-165145-289`.
+Native hardware and external release gates remain open.
+
+## Semantic launcher wiring - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+The Start overview now prefers `woven.search` Application hits over its local
+substring filter, falling back when the broker is unavailable. A bounded
+`libwoven::search` client carries only a query and returns compact hits; no
+path, file content, index mutation, syscall, capability or ABI change is
+involved. Results are re-sorted into catalog order to keep the launcher's
+keyboard/pointer grid contract unchanged.
+
+Validation: warning-denying Clippy and workspace checks pass; the 1-CPU
+desktop journey reaches overview, logs semantic hits and launches WovenFiles.
+Its final `keyboard_refresh` framebuffer oracle timed out, but the identical
+timeout reproduces on the pre-change commit under the same limits, so it is
+an existing harness/environment limitation, not a regression or an acceptance
+claim. Native hardware and external release gates are unchanged.
 
 ## Live installed settings propagation - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
