@@ -1,5 +1,19 @@
 # Stage status
 
+## Stage 29 Z3 live-test USB preparation - 2026-11-27 - DONE (NO BOOT)
+
+Built the current `master` (`c1d224a5`) `hardware-demo` image with the
+acceptance system-app signing environment and wrote it to the already-authorized
+non-boot VendorCo USB (serial `4045141272666606378`) using the identity-,
+size-, serial- and SHA-256-guarded writer. Image: `35717120` bytes, SHA-256
+`57ec93021ed6f465d64af23fc6ed6cc4871f3e467b1afab0dfa32fea3f8a274a`. The writer
+verified the payload readback before partitioning; independent read-only checks
+confirm the ESP hash matches the source image and the `WOVENLOG` FAT32 partition
+is present at offset `36700160`. No reboot, firmware setting, boot entry, TPM or
+other device was touched. This is media preparation only: no boot was attempted
+and the classification remains Tier 2 with 0 native-passed categories. Record:
+`docs/audit-z3-bootable-usb-preparation-2026-11-27.md`.
+
 ## Stage 29 Z3 Phase 1 physical USB storage - 2026-11-27 - ACCEPTED (BOUNDED)
 
 After explicit authorization and exact device identity verification, the

@@ -1,3 +1,16 @@
+## OpenCode - Stage 29 Z3 live-test USB preparation (2026-11-27) - DONE (NO BOOT)
+
+Prepared the already-authorized spare USB for an owner-controlled boot attempt,
+without booting or changing firmware/boot entries. Built the current `master`
+(`c1d224a5`) `hardware-demo` image with the acceptance app-signing environment
+(35,717,120 bytes, SHA-256 `57ec9302…274a`) and wrote it with
+`write-live-usb.ps1` under its exact model/size/serial and hash guards. The
+writer verified payload readback before adding `WOVENLOG`; independent read-only
+checks confirm the ESP hash matches the source image and the FAT32 label is
+present. No reboot, TPM or other disk was touched; no native category passed.
+Evidence and limits: `docs/audit-z3-bootable-usb-preparation-2026-11-27.md`.
+Please keep boot attempts and any power-loss work owner-controlled.
+
 ## OpenCode - Stage 29 Z3 Phase 1 physical USB storage (2026-11-27) - DONE (BOUNDED)
 
 With explicit owner authorization for the exact non-boot VendorCo USB
