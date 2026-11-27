@@ -41,6 +41,24 @@ jobs:
           Write-Host "CARGO_HOME=$env:CARGO_HOME"
           Write-Host "RUSTUP_HOME=$env:RUSTUP_HOME"
 
+      # The acceptance gate itself stays locked and offline. Populate the
+      # shared runner cache first so the clean-room provenance and signer
+      # checks do not depend on whichever crates a previous run happened to
+      # leave behind.
+      - name: Fetch locked Cargo dependencies
+        shell: powershell
+        env:
+          CARGO_NET_OFFLINE: "false"
+        run: |
+          cargo fetch --locked
+          git ls-files '*Cargo.lock' | ForEach-Object {
+            if ([string]::IsNullOrWhiteSpace($_)) { return }
+            $directory = Split-Path -Parent $_
+            if ([string]::IsNullOrWhiteSpace($directory)) { return }
+            if (-not (Test-Path (Join-Path $directory 'Cargo.toml'))) { return }
+            cargo fetch --locked --manifest-path $_
+          }
+
       - name: Verify WovenHat build environment
         shell: powershell
         run: |

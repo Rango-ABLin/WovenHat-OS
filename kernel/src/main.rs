@@ -300,6 +300,12 @@ mod woven_input;
 ))]
 mod wovenfs;
 mod wovenguard;
+#[cfg(feature = "wovenweb-cxx-test")]
+mod wovenweb_cxx_gate;
+#[cfg(feature = "wovenweb-memory-test")]
+mod wovenweb_memory_gate;
+#[cfg(feature = "wovenweb-net-test")]
+mod wovenweb_net_gate;
 #[cfg(any(
     not(feature = "qemu-test"),
     feature = "stage13-12-test",
@@ -13274,24 +13280,21 @@ fn stage20_18_self_test() -> bool {
     // Prove notification content survives the 3D path. An absent card must
     // not pass as "sane wallpaper": compare every projected pixel and require
     // visible border/text samples in the independent expected image.
-    let wallpaper = |x: i32, y: i32| {
+    const WEAVE_PITCH: i32 = 220;
+    const WEAVE_TINT_OPACITY: u8 = 6;
+    let background = |x: i32, y: i32| {
         let span = (height - 1).max(1);
         let gradient = blend_pixel(
             rgb(16, 78, 82),
             rgb(11, 29, 58),
             (y.clamp(0, span) * 255 / span) as u8,
         );
-        let tint = if (x / 96 + y / 96) % 2 == 0 {
+        let tint = if ((x + y) / WEAVE_PITCH) % 2 == 0 {
             rgb(255, 255, 255)
         } else {
             0
         };
-        let woven = blend_pixel(tint, gradient, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(rgb(255, 255, 255), woven, 10)
-        } else {
-            woven
-        }
+        blend_pixel(tint, gradient, WEAVE_TINT_OPACITY)
     };
     let (toast_x, toast_y) = (width - 188, height - 80);
     let mut toast = Surface::new(180, 22);
@@ -13300,7 +13303,7 @@ fn stage20_18_self_test() -> bool {
             toast.set_pixel(
                 x,
                 y,
-                blend_pixel(rgb(28, 32, 44), wallpaper(toast_x + x, toast_y + y), 216),
+                blend_pixel(rgb(28, 32, 44), background(toast_x + x, toast_y + y), 216),
             );
         }
     }
@@ -13316,7 +13319,7 @@ fn stage20_18_self_test() -> bool {
             22,
             30 << 16,
             |lx, ly| toast.pixel(lx, ly),
-            wallpaper,
+            background,
         )
     };
     let visible = (toast_y..toast_y + 22)

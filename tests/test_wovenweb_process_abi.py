@@ -8,8 +8,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class ProcessAbiContracts(unittest.TestCase):
     def setUp(self):
-        self.userspace = (ROOT / "kernel/src/userspace.rs").read_text()
-        self.linker = (ROOT / "kernel/src/userspace/linker.rs").read_text()
+        self.userspace = (ROOT / "kernel/src/userspace.rs").read_text(encoding="utf-8")
+        self.linker = (ROOT / "kernel/src/userspace/linker.rs").read_text(encoding="utf-8")
 
     def test_existing_argv_entrypoint_preserves_empty_environment(self):
         self.assertIn("setup_argv_env_stack(address_space, stack, args, &[])", self.userspace)

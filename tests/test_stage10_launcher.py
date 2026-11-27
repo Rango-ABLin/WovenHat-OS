@@ -69,5 +69,8 @@ class Stage10LauncherTests(unittest.TestCase):
             result = self.run_launcher(root, None, 0)
             expected = root / "target" / "stage10-output"
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertIn(f"child output root: {expected}", result.stdout)
-            self.assertIn(f"child target: {expected / 'target'}", result.stdout)
+            # Windows normalises the temp path's drive-letter case; compare
+            # paths case-insensitively without relaxing the output-root check.
+            stdout = result.stdout.lower()
+            self.assertIn(f"child output root: {expected}".lower(), stdout)
+            self.assertIn(f"child target: {expected / 'target'}".lower(), stdout)

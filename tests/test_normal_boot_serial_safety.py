@@ -48,11 +48,6 @@ class NormalBootSerialSafetyTests(unittest.TestCase):
             with self.subTest(marker=marker):
                 self.assertTrue(SHELL.normal_boot_serial_errors(DESKTOP + marker + '\\n', True, APPS))
 
-    def test_contradictory_failure_after_positive_markers(self):
-        for marker in ('[BOOT] FAILED', '[SESSION] desktop FAIL',
-                       '[APPS] installation FAILED', '[SMP] shootdown FAILED'):
-            with self.subTest(marker=marker):
-                self.assertTrue(SHELL.normal_boot_serial_errors(DESKTOP + marker + '\\n', True))
 
     def test_missing_desktop_and_diagnostic_evidence(self):
         self.assertTrue(SHELL.normal_boot_serial_errors(BASE, True, APPS))

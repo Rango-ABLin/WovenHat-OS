@@ -23,8 +23,10 @@ class SystemAppPackagingTests(unittest.TestCase):
         self.assertEqual(ids[-1], "woven-installer")
 
     def test_shell_catalog_capacity_covers_all_signed_system_apps(self):
-        shell_source = (ROOT / "apps" / "woven-shell" / "src" / "main.rs").read_text()
-        match = re.search(r"^const MAX_APPS: usize = ([0-9]+);$", shell_source, re.MULTILINE)
+        shell_source = (ROOT / "apps" / "woven-shell" / "src" / "main.rs").read_text(encoding="utf-8")
+        tokens_source = (ROOT / "apps" / "woven-shell" / "src" / "tokens.rs").read_text(encoding="utf-8")
+        self.assertIn("use tokens::*;", shell_source)
+        match = re.search(r"^pub const MAX_APPS: usize = ([0-9]+);$", tokens_source, re.MULTILINE)
         self.assertIsNotNone(match, "WovenShell catalog capacity declaration missing")
         capacity = int(match.group(1))
         self.assertGreaterEqual(
