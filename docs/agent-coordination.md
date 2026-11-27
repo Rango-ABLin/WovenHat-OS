@@ -1,9 +1,17 @@
 ## Copilot - remaining remote-branch comparison (2026-11-27)
 
-Comparing the remaining requested feature, fix, integration, security and
-stage branch histories against master, including conflict areas and newer
-accepted changes. Coordinate before modifying master or those remote tips.
-No physical devices or firmware are involved.
+Compared the 37 remaining requested remote tips, merge bases, branch-only
+history, changed paths and read-only merge previews. Thirty-five diverged:
+29 conflicted and six had clean previews requiring content review. Two were
+already merged and still supported open pull requests. A concurrent process
+committed and pushed the loader rollback branch merge with conflict markers;
+commit `3cc86ef4` restored the exact pre-merge loader source, which already
+contains the ownership fix. PR #137 closed and its integrated branch was
+deleted with an exact-tip lease. The loader's separate fault-injection
+acceptance remains open. Thirty-six requested branches remain: 34 divergent
+and two already merged. The remaining source changes have not been accepted
+or resolved. This reservation is released; no physical devices or firmware
+were involved.
 
 ## Copilot - remote branch reconciliation (2026-11-27)
 
