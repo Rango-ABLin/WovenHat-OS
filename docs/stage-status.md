@@ -63,10 +63,15 @@ another owner's in-progress kernel edits (`vfs.rs`/`storage.rs`/`fat32.rs`)
 stopped breaking the build; I did not touch those files. Two earlier 2/4-CPU
 attempts during that WIP build break are preserved as
 `shadow-clip-pins-{2,4}cpu-3G`. This proves the compositor blend path is
-non-blocking for maximize with shadows on at 1/2/4 CPUs, but does not yet
-claim WSIZ client reflow on maximize: that client-resize path is a separate
-change and remains deferred. Desktop qualification and the full
-`RUN-STAGE10.7.ps1` chain were not rerun here and are not claimed.
+non-blocking for maximize with shadows on at 1/2/4 CPUs. WSIZ client reflow
+on maximize was then proven by strengthening `scripts/test-taskbar-pins.py` to
+require the client's `WovenTerminal: window resized` echo and the shell's
+`window resized (maximized, clamped)` / `window resized` markers on maximize
+and restore. That gate PASSES at 1/2/4 CPUs
+(`wsiz-reflow-{1,2,4}cpu`, zero failures, reflow timings recorded), and the
+baseline-enforced desktop qualification PASSES at 1/2/4 CPUs
+(`wsiz-desktop-{1,2,4}cpu`). No assertion, timeout or budget was weakened.
+The full `RUN-STAGE10.7.ps1` chain was not rerun here and is not claimed.
 
 ## Stage 1-19 current-head software gate closure - 2026-11-27 - VERIFIED (EXTERNAL GATES OPEN)
 
