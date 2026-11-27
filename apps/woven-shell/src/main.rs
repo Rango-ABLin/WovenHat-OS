@@ -5444,7 +5444,14 @@ fn load_accessibility_settings(path: &str, desktop: &mut Desktop) {
     settings.apply_json(data);
     // Both fields are applied absolutely so a later record that turns them
     // off takes effect immediately, not just on the next boot.
-    THEME_MODE.store(u8::from(settings.high_contrast), Ordering::Relaxed);
+    let theme_mode = if settings.high_contrast {
+        1
+    } else if libwoven::settings_policy::read_light_theme(data) == Some(true) {
+        2
+    } else {
+        0
+    };
+    THEME_MODE.store(theme_mode, Ordering::Relaxed);
     desktop.reduced_motion = settings.reduced_motion;
 }
 

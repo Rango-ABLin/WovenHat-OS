@@ -2938,6 +2938,14 @@ When bring-up starts `hda0`, it calls `hda::start_output("hda0")`.
 libwoven exposes `audio_info`, `audio_play`, `audio_capture` and
 `audio_set_volume`.
 
+**Settings propagation.** WovenSettings mutates only validated fixed-width
+fields in the bounded installed record: `high_contrast`, `reduced_motion`, and
+the five-byte `theme` value. It writes the installed and durable records with
+existing file authority. WovenShell remains read-only, periodically hashes the
+installed record, and applies the complete theme, taskbar and accessibility
+state only after a re-read succeeds. Malformed, duplicate, unsupported, or
+ambiguous values are ignored rather than partially applied.
+
 **Capability.** `AudioPlayback` is capability 24 and permission 16
 (`Permission::Audio`). It is in the system-service ceiling and in the user
 ceiling, so the permission broker can grant it. Recording uses the

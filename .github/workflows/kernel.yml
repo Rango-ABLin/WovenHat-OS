@@ -104,7 +104,10 @@ jobs:
       - name: Independent-workspace reproducibility boundary
         shell: bash
         run: |
-          python3 -m unittest tests.test_release_boundaries
+          python3 -m unittest \
+            tests.test_release_boundaries \
+            tests.test_hardware_release_signer \
+            tests.test_package_release
       - name: Stage 1-5 production software gate 1/2/4-core acceptance
         shell: bash
         run: |

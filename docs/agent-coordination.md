@@ -1,3 +1,11 @@
+## Copilot - desktop personalization and signing CI closure (2026-11-27) - DONE
+
+Added fail-closed persisted Dark/Light/High Contrast and reduced-motion
+settings, live WovenShell theme propagation, and required CI execution for the
+PKCS#11 signer/package/reproducibility contracts. Focused policy, signing,
+Settings 1/2/4-CPU and shell/app Clippy gates pass. Production key custody,
+independent attestation/review and physical TPM/Secure Boot remain external.
+
 ## Copilot - desktop compositor current-head closure (2026-11-26) - DONE
 
 The full Stage 19.2/19.4-19.9/19.11-19.14 compositor matrix passes at

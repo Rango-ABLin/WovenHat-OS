@@ -1,5 +1,25 @@
 # Stage status
 
+## Desktop settings/personalization and signing CI closure - 2026-11-27 - ACCEPTED (BOUNDED SOFTWARE)
+
+Completed the remaining bounded personalization path. WovenSettings now
+persists fixed-width Dark/Light/High Contrast theme state and reduced motion;
+legacy/current installed records gain the bounded `theme` field, and ambiguous
+or malformed values fail closed. WovenShell's periodic settings observer applies
+theme and reduced-motion changes live without acquiring write authority.
+
+The desktop compositor/window-management scope remains accepted at the
+software/QEMU boundary: lease and surface isolation, focus/input routing,
+damage-only presentation, window stacking/resize/tiling/workspaces and teardown
+are covered by the Stage 19/20 matrices. Release CI now also requires the
+PKCS#11 hardware-signer adapter, reproducibility boundary and package-boundary
+contracts.
+
+External release gates remain explicit: native input/GPU performance and
+device-loss qualification; production non-exportable keys, witnessed custody,
+signed exact-commit artifacts, independent build/review attestation, and
+physical Secure Boot/TPM evidence.
+
 ## Desktop compositor current-head closure - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
 The compositor authority path is green on the current source. The complete
