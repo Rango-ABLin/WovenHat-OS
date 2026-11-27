@@ -1118,6 +1118,12 @@ jobs:
             python3 scripts/test-hello-gui-compositor-qemu.py --stage 19.13 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
             python3 scripts/test-hello-gui-compositor-qemu.py --stage 19.14 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
           done
+          for cpu in 8 16; do
+            python3 scripts/test-stage13-13-usb-input.py --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            for stage in 19.2 19.4 19.5 19.6 19.7 19.8 19.9 19.11 19.12 19.13 19.14; do
+              python3 scripts/test-hello-gui-compositor-qemu.py --stage "$stage" --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            done
+          done
       - name: Stage 20 WovenShell desktop acceptance
         shell: bash
         run: |
@@ -1168,6 +1174,10 @@ jobs:
             python3 scripts/test-woven-shell-qemu.py --stage 20.13 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
             python3 scripts/test-stage20-14-monitors.py --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
             python3 scripts/test-stage20-14b-desktop.py --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-woven-shell-qemu.py --stage 20.19 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+          done
+          for cpu in 8 16; do
+            python3 scripts/test-woven-shell-qemu.py --stage 20.1 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
             python3 scripts/test-woven-shell-qemu.py --stage 20.19 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
           done
       - name: Preserve desktop-userspace evidence

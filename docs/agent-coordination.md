@@ -1,3 +1,26 @@
+## OpenCode - compositor blend stall diagnosis (2026-11-27) - ACTIVE
+
+Starting Tier 2 with the `present_region_blended` stall that forced frame-only
+maximize and disabled window shadows in `32c14dbe`. Diagnosis: the shadow loop
+blends three full frame-sized rectangles per window, most of which the window
+immediately overwrites; on a band-filling window under 1-CPU TCG that is ~3M
+per-pixel blends per repaint, a throughput cliff rather than a lock deadlock
+(`PreemptMutex` already defers local preemption). I am clipping each shadow
+band to the visible ring outside the frame and restoring shadows, then will
+validate with the unchanged taskbar-pins and desktop-qualification gates at
+1/2/4 CPUs before touching WSIZ reflow. Scope:
+`apps/woven-shell/src/{geometry,main}.rs` and shell tests only — no kernel
+compositor or syscall changes, so it does not overlap the Copilot native
+compositor work below.
+
+## Copilot - native compositor/USB 16-CPU closure (2026-11-27) - DONE
+
+Fail-closed xHCI BIOS handoff, bounded stalled-shell termination, compositor
+claim diagnostics and large-VFS shell staging implemented. USB input, Stage
+19 compositor authority/input/damage/window/scale paths, and WovenShell 20.1
+plus 20.19 pass at 8/16 CPUs; CI expanded accordingly. Physical re-test with
+returned evidence remains required.
+
 ## Copilot - desktop personalization and signing CI closure (2026-11-27) - DONE
 
 Added fail-closed persisted Dark/Light/High Contrast and reduced-motion

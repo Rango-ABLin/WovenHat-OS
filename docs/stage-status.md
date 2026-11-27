@@ -1,5 +1,24 @@
 # Stage status
 
+## Native compositor hang and 16-CPU input closure - 2026-11-27 - ACCEPTED (BOUNDED QEMU/SOFTWARE)
+
+The native compositor path no longer treats a live-but-stalled WovenShell as a
+successful session: after the bounded display wait it is terminated and the
+diagnostic fallback owns the rest of the boot. Claim begin/complete serial
+evidence now localizes any future hang, and enlarged shell binaries are
+staged through the bounded large-asset VFS path rather than the 64 KiB node
+insertor. The physical-path fix also makes xHCI BIOS ownership handoff
+fail closed when firmware never releases ownership.
+
+USB keyboard/mouse and the complete Stage 19.2/19.4-19.9/19.11-19.14 compositor
+matrix now pass at 8 and 16 CPUs in addition to the mandatory 1/2/4 profiles.
+WovenShell Stage 20.1 and 20.19 also pass at 8/16 CPUs. CI now retains these
+high-SMP desktop/input gates.
+
+This does not claim a fresh physical USB or bare-metal compositor result.
+Physical keyboard/mouse and native compositor qualification remain pending a
+new controlled boot with returned serial/log evidence.
+
 ## Desktop settings/personalization and signing CI closure - 2026-11-27 - ACCEPTED (BOUNDED SOFTWARE)
 
 Completed the remaining bounded personalization path. WovenSettings now
