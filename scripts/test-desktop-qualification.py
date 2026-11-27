@@ -62,6 +62,16 @@ class UnsupportedQualification(RuntimeError):
 class GateFailure(RuntimeError):
     """A real-QEMU gate ran and produced failed evidence."""
 
+    def __init__(
+        self,
+        message: str,
+        timings: dict[str, float] | None = None,
+        qemu_exit_code: int | None = None,
+    ):
+        super().__init__(message)
+        self.timings = dict(timings) if timings is not None else None
+        self.qemu_exit_code = qemu_exit_code
+
 
 def free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
@@ -283,7 +293,12 @@ def wait_marker(
             timings[phase] = (time.monotonic() - started) * 1000.0
             return
         if process.poll() is not None:
-            raise GateFailure(f"QEMU exited before marker {marker!r} for {phase}")
+            raise GateFailure(
+                f"QEMU exited before marker {marker!r} for {phase} "
+                f"(exit code {process.returncode})",
+                timings,
+                process.returncode,
+            )
         time.sleep(0.05)
     raise GateFailure(f"timed out waiting for marker {marker!r} for {phase}")
 
@@ -309,7 +324,11 @@ def wait_markers_after(
         if marker_index == len(markers):
             return
         if process.poll() is not None:
-            raise GateFailure(f"QEMU exited before ordered markers {markers!r}")
+            raise GateFailure(
+                f"QEMU exited before ordered markers {markers!r} "
+                f"(exit code {process.returncode})",
+                qemu_exit_code=process.returncode,
+            )
         time.sleep(0.05)
     raise GateFailure(f"timed out waiting for ordered markers {markers!r}")
 
@@ -659,16 +678,24 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
                     time.monotonic() - batch_started
                 ) * 1000.0
                 if attempt == 1:
-                    wait_marker(serial, "woven-shell: diagnostics lock key ticks=",
-                                input_deadline, process, "diagnostic_first_key_seen_ms",
-                                timings, input_started)
+                    wait_marker(serial,
+                                "woven-shell: diagnostics identity begin ticks=",
+                                input_deadline, process,
+                                "diagnostic_identity_begin_ms", timings, input_started)
+                    wait_marker(serial,
+                                "woven-shell: diagnostics identity end elapsed_ticks=",
+                                input_deadline, process,
+                                "diagnostic_identity_end_ms", timings, input_started)
                 retry_deadline = min(time.monotonic() + 2.0, input_deadline)
                 while time.monotonic() < retry_deadline:
                     if pin_marker in read_serial(serial):
                         break
                     if process.poll() is not None:
                         raise GateFailure(
-                            f"QEMU exited before marker {pin_marker!r} for sign_in_input_ms"
+                            f"QEMU exited before marker {pin_marker!r} for sign_in_input_ms "
+                            f"(exit code {process.returncode})",
+                            timings,
+                            process.returncode,
                         )
                     time.sleep(0.05)
                 if pin_marker in read_serial(serial):
@@ -974,13 +1001,28 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
             if serial_has_fatal_evidence(serial_log):
                 raise GateFailure("fatal kernel/security evidence found in serial.log")
             if process.poll() is not None:
-                raise GateFailure("QEMU exited before evidence collection completed")
+                raise GateFailure(
+                    f"QEMU exited before evidence collection completed "
+                    f"(exit code {process.returncode})",
+                    timings,
+                    process.returncode,
+                )
             qmp.command("quit")
             process.wait(timeout=10)
             if process.returncode != 0:
-                raise GateFailure(f"QEMU quit returned {process.returncode}")
-    except (OSError, EOFError, ValueError, RuntimeError, GateFailure) as error:
-        raise GateFailure(str(error)) from error
+                raise GateFailure(
+                    f"QEMU quit returned {process.returncode}", timings, process.returncode
+                )
+    except GateFailure as error:
+        error.timings = dict(timings)
+        raise
+    except (OSError, EOFError, ValueError, RuntimeError) as error:
+        exit_code = (
+            process.returncode
+            if process is not None and process.poll() is not None
+            else None
+        )
+        raise GateFailure(str(error), timings, exit_code) from error
     finally:
         if qmp is not None:
             try:
@@ -1268,6 +1310,10 @@ def main(argv: list[str] | None = None) -> int:
             "status": "FAIL", "pass": False, "failures": [str(error)],
             "serial": "serial.log", "screenshots": sorted(path.name for path in output.glob("*.ppm")),
         })
+        if error.timings is not None:
+            base["timings_ms"] = error.timings
+        if error.qemu_exit_code is not None:
+            base["qemu_exit_code"] = error.qemu_exit_code
         comparison = output / "reference-comparison.json"
         if comparison.is_file():
             base["reference_comparison"] = json.loads(comparison.read_text(encoding="utf-8"))

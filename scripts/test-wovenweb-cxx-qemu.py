@@ -94,6 +94,11 @@ def main():
             "-Werror",
             "-Wconversion",
             "-Wsign-conversion",
+            # The standalone fixture includes the same exported kernel ABI
+            # header as the musl port; the include root must be explicit because
+            # this compile is driven outside the port's build system.
+            "-I",
+            str(root / "ports/musl/include"),
             "-c",
             str(c_fixture),
             "-o",

@@ -501,6 +501,23 @@ pub fn self_test() -> bool {
         false
     }
 
+    // This QEMU fixture needs a deterministic, test-only entropy source:
+    // production `fill_secure` intentionally fails closed without RDRAND.
+    // The guard clears the pool on every exit path, so no later test phase can
+    // observe a seeded secure boundary from this self-test.
+    struct EntropyFixtureGuard;
+    impl Drop for EntropyFixtureGuard {
+        fn drop(&mut self) {
+            crate::entropy::clear_for_test();
+        }
+    }
+    let _entropy_guard = EntropyFixtureGuard;
+    crate::entropy::seed_for_test([
+        0x28, 0x57, 0x4f, 0x56, 0x45, 0x4e, 0x48, 0x41, 0x54, 0x2d, 0x49, 0x4e, 0x53, 0x54, 0x41,
+        0x4c, 0x4c, 0x45, 0x52, 0x2d, 0x54, 0x45, 0x53, 0x54, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
+        0x06, 0x07,
+    ]);
+
     const SECTORS: usize = 150_000;
     let mut disk = InstallerProbeDisk::new(SECTORS as u64);
     let Ok(layout) = gpt::write_layout(&mut disk, ESP_SECTORS, 32_768) else {

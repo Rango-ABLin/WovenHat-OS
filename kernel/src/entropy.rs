@@ -15,10 +15,10 @@
 
 use x86_64::instructions::random::RdRand;
 
-#[cfg(feature = "stage13-9-test")]
+#[cfg(any(feature = "stage13-9-test", feature = "stage28-installer-test"))]
 pub use secure::*;
 
-#[cfg(not(feature = "stage13-9-test"))]
+#[cfg(not(any(feature = "stage13-9-test", feature = "stage28-installer-test")))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EntropyError {
     Unavailable,
@@ -29,7 +29,7 @@ pub enum EntropyError {
 /// source. Unlike [`random_u64`], this function never falls back to timer or
 /// address mixing. A transiently unavailable source clears the whole output
 /// and fails closed so callers cannot accidentally consume partial material.
-#[cfg(not(feature = "stage13-9-test"))]
+#[cfg(not(any(feature = "stage13-9-test", feature = "stage28-installer-test")))]
 pub fn fill_secure(out: &mut [u8]) -> Result<(), EntropyError> {
     if out.is_empty() {
         return Err(EntropyError::InvalidRequest);
@@ -55,8 +55,9 @@ pub fn fill_secure(out: &mut [u8]) -> Result<(), EntropyError> {
     Ok(())
 }
 
-// The unseeded secure-pool candidate belongs to the Wi-Fi feature boundary.
-#[cfg(feature = "stage13-9-test")]
+// The unseeded secure-pool candidate belongs to test-only feature boundaries.
+// Production builds keep the hardware-only, fail-closed `fill_secure` above.
+#[cfg(any(feature = "stage13-9-test", feature = "stage28-installer-test"))]
 mod secure {
     use super::random_u64;
     use spin::Mutex;
@@ -104,7 +105,7 @@ mod secure {
                 return Err(EntropyError::Unavailable);
             }
 
-            #[cfg(feature = "stage13-9-test")]
+            #[cfg(any(feature = "stage13-9-test", feature = "stage28-installer-test"))]
             {
                 let mut x =
                     self.counter ^ u64::from_le_bytes(self.key[..8].try_into().unwrap_or([0; 8]));
@@ -118,7 +119,7 @@ mod secure {
                 Ok(())
             }
 
-            #[cfg(not(feature = "stage13-9-test"))]
+            #[cfg(not(any(feature = "stage13-9-test", feature = "stage28-installer-test")))]
             {
                 let _ = out;
                 Err(EntropyError::Unavailable)
@@ -152,12 +153,12 @@ mod secure {
         POOL.lock().seeded
     }
 
-    #[cfg(feature = "stage13-9-test")]
+    #[cfg(any(feature = "stage13-9-test", feature = "stage28-installer-test"))]
     pub fn seed_for_test(seed: [u8; 32]) {
         POOL.lock().seed(seed);
     }
 
-    #[cfg(feature = "stage13-9-test")]
+    #[cfg(any(feature = "stage13-9-test", feature = "stage28-installer-test"))]
     pub fn clear_for_test() {
         POOL.lock().clear();
     }

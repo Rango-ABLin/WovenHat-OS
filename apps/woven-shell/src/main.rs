@@ -168,6 +168,7 @@ mod geometry;
 use geometry::{Area, Dirty};
 mod textures;
 use textures::{CENTER_TEXTURE, QS_PANEL_TEXTURE, TILE, TILE_DEPTH_3D, TOAST_TEXTURE};
+mod window_switcher;
 
 /// The first desktop release keeps a small, curated set of shortcuts visible
 /// so the desktop feels useful before the launcher is opened. The catalog
@@ -1476,7 +1477,7 @@ impl Desktop {
             }
             Key::F1 => return self.toggle_launcher(),
             // Tiling waits until the launcher closes.
-            Key::Char(_) | Key::F2 | Key::F3 | Key::F4 => {}
+            Key::Char(_) | Key::WindowNext | Key::WindowPrevious | Key::F2 | Key::F3 | Key::F4 => {}
         }
         before.union(self.overview_area())
     }
@@ -2704,13 +2705,6 @@ impl Desktop {
 
     /// A key at the lock screen. Returns the area to repaint.
     fn lock_key(&mut self, key: Key) -> Area {
-        // TEMPORARY P0 DIAGNOSTIC: correlate host injection with guest input
-        // consumption without changing routing or ordering.
-        let mut key_ticks = [0u8; 20];
-        log(&[
-            b"woven-shell: diagnostics lock key ticks=",
-            libwoven::format_u64(libwoven::ticks(), &mut key_ticks),
-        ]);
         match key {
             Key::F2 if self.mode == LockMode::SignIn => self.power(false),
             Key::F3 if self.mode == LockMode::SignIn => self.power(true),
@@ -2754,7 +2748,14 @@ impl Desktop {
                     }
                     _ => self.pin_matches(),
                 } {
+                    // TEMPORARY P0 DIAGNOSTIC: bracket the bounded kernel
+                    // identity verification without adding per-key serial work.
                     let identity_started = libwoven::ticks();
+                    let mut identity_begin_digits = [0u8; 20];
+                    log(&[
+                        b"woven-shell: diagnostics identity begin ticks=",
+                        libwoven::format_u64(identity_started, &mut identity_begin_digits),
+                    ]);
                     let kernel_authenticated = match self.mode {
                         LockMode::SignIn => match self.accounts[self.chosen] {
                             Some(account) => {
@@ -2794,12 +2795,9 @@ impl Desktop {
                     // TEMPORARY P0 DIAGNOSTIC: measure the bounded kernel
                     // identity verification separately from input delivery.
                     let identity_ticks = libwoven::ticks().saturating_sub(identity_started);
-                    let mut identity_start_digits = [0u8; 20];
                     let mut identity_digits = [0u8; 20];
                     log(&[
-                        b"woven-shell: diagnostics identity verify start_ticks=",
-                        libwoven::format_u64(identity_started, &mut identity_start_digits),
-                        b" elapsed_ticks=",
+                        b"woven-shell: diagnostics identity end elapsed_ticks=",
                         libwoven::format_u64(identity_ticks, &mut identity_digits),
                     ]);
                     if !kernel_authenticated {
@@ -4647,6 +4645,24 @@ impl Desktop {
             .union(self.taskbar())
     }
 
+    /// Switch focus within the current workspace's bounded visible stack.
+    /// Forward selects the next-most-recent window; reverse selects the
+    /// opposite end. Minimized and other-workspace windows are absent from
+    /// this stack, so they cannot be restored or crossed accidentally.
+    fn cycle_window_focus(&mut self, reverse: bool) -> Area {
+        self.cancel_pointer_gesture();
+        let panels = self.close_panels();
+        let Some(target) = window_switcher::target(&self.stack[..self.stacked], reverse) else {
+            return panels;
+        };
+        log(&[if reverse {
+            b"woven-shell: Shift+Alt+Tab window focus"
+        } else {
+            b"woven-shell: Alt+Tab window focus"
+        }]);
+        panels.union(self.focus(target))
+    }
+
     /// A window is minimized while its slot is outside the visual stack: it
     /// is then never painted, focused or hit-tested, but it keeps its taskbar
     /// entry so it can be restored.
@@ -5486,6 +5502,10 @@ impl Desktop {
                 };
                 self.toggle_pin(entry)
             }
+            // The kernel decoders consume the modifier state and deliver
+            // semantic shortcuts, so plain Tab remains available to clients.
+            InputEvent::Key(Key::WindowNext) => self.cycle_window_focus(false),
+            InputEvent::Key(Key::WindowPrevious) => self.cycle_window_focus(true),
             InputEvent::Key(key) if self.launcher_open => self.launcher_key(key),
             InputEvent::Key(Key::F1) => {
                 log(&[b"woven-shell: F1 received"]);

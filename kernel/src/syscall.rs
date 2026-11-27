@@ -4778,6 +4778,8 @@ const INPUT_KIND_F2: u64 = 8;
 const INPUT_KIND_F3: u64 = 14;
 const INPUT_KIND_F4: u64 = 15;
 const INPUT_KIND_ESCAPE: u64 = 16;
+const INPUT_KIND_WINDOW_NEXT: u64 = 17;
+const INPUT_KIND_WINDOW_PREVIOUS: u64 = 18;
 const INPUT_KIND_POINTER_MOVE: u64 = 6;
 const INPUT_KIND_POINTER_BUTTON: u64 = 7;
 const INPUT_KIND_SCROLL: u64 = 9;
@@ -4796,6 +4798,8 @@ fn encode_input(event: crate::woven_input::Event) -> Option<u64> {
         Event::Key(Key::Enter) => Some(packed(INPUT_KIND_ENTER, 0)),
         Event::Key(Key::Backspace) => Some(packed(INPUT_KIND_BACKSPACE, 0)),
         Event::Key(Key::Tab) => Some(packed(INPUT_KIND_TAB, 0)),
+        Event::Key(Key::WindowNext) => Some(packed(INPUT_KIND_WINDOW_NEXT, 0)),
+        Event::Key(Key::WindowPrevious) => Some(packed(INPUT_KIND_WINDOW_PREVIOUS, 0)),
         Event::Key(Key::Escape) => Some(packed(INPUT_KIND_ESCAPE, 0)),
         Event::Key(Key::F1) => Some(packed(INPUT_KIND_F1, 0)),
         Event::Key(Key::F2) => Some(packed(INPUT_KIND_F2, 0)),
@@ -4918,6 +4922,12 @@ fn sys_input_inject(kind: u64, value1: u64, value2: u64) -> u64 {
             crate::woven_input::Key::Backspace,
         )),
         INPUT_KIND_TAB => Some(crate::woven_input::Event::Key(crate::woven_input::Key::Tab)),
+        INPUT_KIND_WINDOW_NEXT => Some(crate::woven_input::Event::Key(
+            crate::woven_input::Key::WindowNext,
+        )),
+        INPUT_KIND_WINDOW_PREVIOUS => Some(crate::woven_input::Event::Key(
+            crate::woven_input::Key::WindowPrevious,
+        )),
         INPUT_KIND_F1 => Some(crate::woven_input::Event::Key(crate::woven_input::Key::F1)),
         INPUT_KIND_F2 => Some(crate::woven_input::Event::Key(crate::woven_input::Key::F2)),
         INPUT_KIND_F3 => Some(crate::woven_input::Event::Key(crate::woven_input::Key::F3)),

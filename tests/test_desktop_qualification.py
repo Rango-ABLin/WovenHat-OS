@@ -91,6 +91,26 @@ class DesktopQualificationTests(unittest.TestCase):
             Path("C:/qemu/share/edk2-x86_64-code.fd"),
         )
 
+    def test_qemu_exit_failure_preserves_exit_code_and_timings(self):
+        class ExitedProcess:
+            returncode = -9
+
+            def poll(self):
+                return self.returncode
+
+        timings = {"desktop_ready_ms": 123.5}
+        with tempfile.TemporaryDirectory() as directory:
+            serial = Path(directory) / "serial.log"
+            serial.write_text("", encoding="utf-8")
+            with self.assertRaises(MODULE.GateFailure) as caught:
+                MODULE.wait_marker(
+                    serial, "never", float("inf"), ExitedProcess(), "phase", timings, 0.0
+                )
+        failure = caught.exception
+        self.assertEqual(failure.qemu_exit_code, -9)
+        self.assertEqual(failure.timings, timings)
+        self.assertIn("exit code -9", str(failure))
+
 
 if __name__ == "__main__":
     unittest.main()

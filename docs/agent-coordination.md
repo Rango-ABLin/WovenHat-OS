@@ -12116,3 +12116,23 @@ warning-denying default/Stage 13.7/Stage 13.13 kernel Clippy, freestanding
 shell Clippy, and all-target Clippy pass. Real-QEMU and full Stage 10.7 remain
 open because the P0 desktop owner immediately resumed the serialized chain;
 no full acceptance or physical-keyboard claim is made.
+## Codex - combined-source regression acceptance (2026-11-27) - PASS
+
+At the owner's explicit request, running the exact full Windows gate
+`RUN-STAGE10.7.ps1` once against the current combined dirty source tree,
+including concurrent WovenWeb, P0 desktop diagnostics, secure-RNG and Alt+Tab
+changes. Preflight found no running QEMU, Cargo, rustc or acceptance PowerShell
+process; the preceding WovenWeb entry says QEMU ownership is released. This
+reservation owns the serialized QEMU/output lane until the result and preserved
+audit directory are recorded. No source, assertion, timeout or test is being
+changed during the chain.
+
+Result: the exact launcher exited 0. Host regressions (292 tests), build,
+warning-denying host/kernel Clippy and workspace tests passed. QEMU memory/boot
+passed 10x at 1 CPU, 30x at 2 CPUs and 20x at 4 CPUs; live networking and
+Stages 8.1 through 10.7 passed at 1/2/4 CPUs, including Stage 10.7's two
+sequential TCP clients and FIN/EOF. Evidence:
+`D:\WovenHat-OS-output\audit-artifacts\acceptance-20261127-183839-305`.
+The physical/trust preflight remained correctly not qualified without external
+OVMF VARS, swtpm, sbverify, disk and development-key inputs. QEMU/output lane
+ownership is released.

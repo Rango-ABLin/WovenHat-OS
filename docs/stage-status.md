@@ -15719,3 +15719,35 @@ This is not full compiler-transparent dependency TLS.  Runtime TLS relocations,
 general-dynamic/TLSDESC access, per-image offset discovery, and a live
 compiler-generated dependency fixture remain open.  Physical and power-loss
 qualification claims are unchanged.
+## Alt+Tab bounded window switching - 2026-11-27 - IMPLEMENTED / QEMU OPEN
+
+PS/2 set-1 and USB boot-HID decoders now recognize Alt+Tab and
+Shift+Alt+Tab without exposing raw modifier presses to ordinary clients. They
+publish additive semantic `WindowNext`/`WindowPrevious` events through packed
+`InputPoll` kinds 17 and 18; plain Tab and all existing event numbers retain
+their accepted behavior. WovenShell consumes these shortcuts before launcher
+or client routing and changes focus only within the current workspace's bounded
+visible stack. Minimized and other-workspace windows remain excluded.
+
+Focused validation passes: PS/2 decoder self-test coverage, Stage 13.13 USB
+decoder coverage, three host window-selection tests, warning-denying default,
+Stage 13.7 and Stage 13.13 kernel Clippy, warning-denying freestanding shell
+Clippy, all-target Clippy, and formatting. Real-QEMU acceptance and the full
+Stage 10.7 chain remain open; the workspace test suite also passes. The P0 desktop owner holds the serialized
+QEMU chain; this entry does not claim full acceptance or physical keyboards.
+
+## Combined-source Stage 10.7 regression - 2026-11-27 - PASSED
+
+The exact Windows launcher `RUN-STAGE10.7.ps1` passed against the combined
+dirty source tree containing the concurrent WovenWeb allocator, P0 desktop
+diagnostics, secure-RNG repair and Alt+Tab input work. Host regressions (292
+tests), build, warning-denying host/kernel Clippy and workspace tests passed.
+QEMU memory/boot passed 10 runs at 1 CPU, 30 at 2 CPUs and 20 at 4 CPUs. Live
+networking and every preserved Stage 8.1-10.7 marker passed at 1/2/4 CPUs;
+Stage 10.7 also verified two sequential TCP clients, TX/RX and FIN/EOF. Audit:
+`D:\WovenHat-OS-output\audit-artifacts\acceptance-20261127-183839-305`.
+
+This is combined-source software/QEMU acceptance. The read-only trust
+preflight correctly remained not qualified because external OVMF VARS, swtpm,
+sbverify, disk-image and development-key inputs were absent; no native or
+physical qualification is inferred.

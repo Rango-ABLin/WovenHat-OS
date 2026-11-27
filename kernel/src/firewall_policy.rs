@@ -28,6 +28,7 @@ pub enum FirewallProtocol {
     Udp,
     Icmp,
     Icmpv6,
+    Other,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -527,22 +528,19 @@ fn transport_meta(
     ipv6: bool,
 ) -> Option<(FirewallProtocol, Option<(u16, u16)>)> {
     match next {
-        6 | 17 => {
-            if payload.len() < 4 {
+        6 => {
+            if payload.len() < 20 {
+                return None;
+            }
+            let header_len = usize::from(payload[12] >> 4) * 4;
+            if header_len < 20 || header_len > payload.len() {
                 return None;
             }
             let ports = (
                 u16::from_be_bytes([payload[0], payload[1]]),
                 u16::from_be_bytes([payload[2], payload[3]]),
             );
-            Some((
-                if next == 6 {
-                    FirewallProtocol::Tcp
-                } else {
-                    FirewallProtocol::Udp
-                },
-                Some(ports),
-            ))
+            Some((FirewallProtocol::Tcp, Some(ports)))
         }
         17 => {
             if payload.len() < 8 {

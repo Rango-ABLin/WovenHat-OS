@@ -2773,6 +2773,7 @@ pub fn input_layouts() -> alloc::vec::Vec<crate::hid::Application> {
 pub fn keyboard_presses(report: [u8; 8], held: &mut [u8; 6]) -> [Option<Key>; 6] {
     let shift = report[0] & 0x22 != 0;
     let control = report[0] & 0x11 != 0;
+    let alt = report[0] & 0x44 != 0;
     let mut keys = [None; 6];
     let mut current = [0u8; 6];
     current.copy_from_slice(&report[2..8]);
@@ -2782,7 +2783,7 @@ pub fn keyboard_presses(report: [u8; 8], held: &mut [u8; 6]) -> [Option<Key>; 6]
     }
     for (slot, usage) in keys.iter_mut().zip(current) {
         if usage > 3 && !held.contains(&usage) {
-            *slot = usage_key(usage, shift, control);
+            *slot = usage_key(usage, shift, control, alt);
         }
     }
     *held = current;
@@ -2790,7 +2791,7 @@ pub fn keyboard_presses(report: [u8; 8], held: &mut [u8; 6]) -> [Option<Key>; 6]
 }
 
 /// A HID keyboard usage (page 7) as a WovenInput key.
-fn usage_key(usage: u8, shift: bool, control: bool) -> Option<Key> {
+fn usage_key(usage: u8, shift: bool, control: bool, alt: bool) -> Option<Key> {
     const DIGITS: &[u8; 10] = b"1234567890";
     const SHIFTED_DIGITS: &[u8; 10] = b"!@#$%^&*()";
     // Usages 0x2d-0x38: - = [ ] \ (non-US #) ; ' ` , . /
@@ -2817,6 +2818,8 @@ fn usage_key(usage: u8, shift: bool, control: bool) -> Option<Key> {
         }
         0x28 => return Some(Key::Enter),
         0x2a => return Some(Key::Backspace),
+        0x2b if alt && shift => return Some(Key::WindowPrevious),
+        0x2b if alt => return Some(Key::WindowNext),
         0x2b => return Some(Key::Tab),
         0x29 => return Some(Key::Escape),
         0x2c => b' ',
@@ -3473,6 +3476,8 @@ pub fn input_self_test() -> bool {
     let rollover = keyboard_presses([0, 0, 1, 1, 1, 1, 1, 1], &mut held);
     let mut control_held = [0u8; 6];
     let control_c = keyboard_presses([0x11, 0, 0x06, 0, 0, 0, 0, 0], &mut control_held);
+    let alt_tab = keyboard_presses([0x04, 0, 0x2b, 0, 0, 0, 0, 0], &mut [0; 6]);
+    let reverse_alt_tab = keyboard_presses([0x06, 0, 0x2b, 0, 0, 0, 0, 0], &mut [0; 6]);
     let decoding = press[0] == Some(Key::Char('a'))
         && press[1..].iter().all(Option::is_none)
         && repeat.iter().all(Option::is_none)
@@ -3481,6 +3486,8 @@ pub fn input_self_test() -> bool {
         && released.iter().all(Option::is_none)
         && shifted[0] == Some(Key::Char('!'))
         && control_c[0] == Some(Key::Char('\u{3}'))
+        && alt_tab[0] == Some(Key::WindowNext)
+        && reverse_alt_tab[0] == Some(Key::WindowPrevious)
         && rollover.iter().all(Option::is_none)
         && held == before_rollover;
     if !step(

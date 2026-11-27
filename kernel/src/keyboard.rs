@@ -70,6 +70,7 @@ impl ScancodeQueue {
 pub struct Keyboard {
     shift: bool,
     control: bool,
+    alt: bool,
 }
 
 impl Keyboard {
@@ -77,6 +78,7 @@ impl Keyboard {
         Self {
             shift: false,
             control: false,
+            alt: false,
         }
     }
 
@@ -114,6 +116,10 @@ impl Keyboard {
                     self.control = false;
                     None
                 }
+                0xB8 => {
+                    self.alt = false;
+                    None
+                }
                 _ => None,
             };
         }
@@ -126,8 +132,14 @@ impl Keyboard {
                 self.control = true;
                 None
             }
+            0x38 => {
+                self.alt = true;
+                None
+            }
             0x1C => Some(Key::Enter),
             0x0E => Some(Key::Backspace),
+            0x0F if self.alt && self.shift => Some(Key::WindowPrevious),
+            0x0F if self.alt => Some(Key::WindowNext),
             0x0F => Some(Key::Tab),
             0x01 => Some(Key::Escape),
             0x3B => Some(Key::F1),
@@ -195,6 +207,13 @@ pub fn self_test() -> bool {
             .decode(0x2e)
             .is_some_and(|key| matches!(key, Key::Char('\u{3}')))
         && keyboard.decode(0x9d).is_none()
+        && keyboard.decode(0x38).is_none()
+        && keyboard.decode(0x0f) == Some(Key::WindowNext)
+        && keyboard.decode(0x2a).is_none()
+        && keyboard.decode(0x0f) == Some(Key::WindowPrevious)
+        && keyboard.decode(0xaa).is_none()
+        && keyboard.decode(0xb8).is_none()
+        && keyboard.decode(0x0f) == Some(Key::Tab)
 }
 
 pub fn handle_interrupt() {

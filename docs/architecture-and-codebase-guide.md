@@ -4927,6 +4927,14 @@ exhausted, the oldest queued motion may be evicted to admit a critical event.
 If the queue contains no evictable motion, publication fails and the bounded
 drop counter records the loss. This policy protects keyboard and button
 delivery without pretending that an unbounded input stream can be lossless.
+
+Alt+Tab is represented as a semantic input boundary rather than raw modifier
+state. The PS/2 and USB boot-HID decoders retain their bounded modifier state
+and translate Alt+Tab or Shift+Alt+Tab into `WindowNext` or `WindowPrevious`.
+Packed `InputPoll` kinds 17 and 18 carry those additive events to WovenShell;
+plain Tab keeps kind 4. The shell consumes the semantic events before client
+routing and selects only from the current workspace's visible stack, so the
+shortcut cannot restore minimized windows or cross workspace ownership.
 The current live hardware path is PS/2; USB HID and virtio-input remain
 separate driver/qualification stages.
 

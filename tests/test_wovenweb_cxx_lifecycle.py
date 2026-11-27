@@ -60,6 +60,7 @@ class CxxLifecycleContracts(unittest.TestCase):
         self.assertIn("rust_lld()", self.harness)
         self.assertIn("--runtime-c-output", self.harness)
         self.assertIn('"-flavor",', self.harness)
+        self.assertIn('str(root / "ports/musl/include")', self.harness)
         self.assertIn("runtime_c_dir", self.workflow)
         self.assertIn("WOVENHAT_RUNTIME_C_ABI_ELF", self.workflow)
         marker = "freestanding C _start + exit ABI: PASSED"

@@ -399,6 +399,12 @@ jobs:
             fi
           done
           test -n "$ovmf_code"
+          # The capture fixture embeds the hello-gui ELF at compile time, so
+          # warning-denying Clippy needs the same built image as the QEMU runs.
+          (cd apps/hello-gui && cargo --config net.offline=false fetch --locked)
+          (cd apps/hello-gui && cargo build --release --locked)
+          export WOVENHAT_HELLO_GUI_IMAGE="$PWD/apps/hello-gui/target/x86_64-unknown-none/release/wovenhat-hello-gui"
+          test -f "$WOVENHAT_HELLO_GUI_IMAGE"
           cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage13-15-capture-virtual-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-stage13-15-audio.py --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
@@ -1111,6 +1117,17 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
+      # Acceptance builds are offline by policy, but hosted runners start
+      # without the required crates.io index and crate archives.
+      - name: Prefetch locked desktop dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo --config net.offline=false fetch --locked
+          # Standalone app lockfiles currently require refresh. Do not alter
+          # tracked lockfiles: the CI runner resolves them only for this job.
+          (cd apps/hello-gui && cargo --config net.offline=false fetch)
+          (cd apps/woven-shell && cargo --config net.offline=false fetch)
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 17-19 display, client surface and compositor acceptance

@@ -138,7 +138,7 @@ pub fn seed_from_hardware() -> bool {
         }
     }
 
-    let mut material = [0u8; 32];
+    let mut material = [0u8; 64];
     for (index, sample) in samples.iter().enumerate() {
         let offset = index * 8;
         material[offset..offset + 8].copy_from_slice(&sample.to_le_bytes());
