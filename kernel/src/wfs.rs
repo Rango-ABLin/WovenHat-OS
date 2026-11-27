@@ -341,6 +341,49 @@ impl SuperBlock {
             root_inode: read_u64(sector, 72),
         })
     }
+
+    /// Whether the regions this superblock describes fit the device in order
+    /// and without overlap: slots, journal, bitmap, inode table, data.
+    ///
+    /// The checksum is unkeyed, so it proves only that the sector was written
+    /// whole. Every later bounds check (inode pointers, bitmap and inode
+    /// locations, journal replay targets) is relative to this geometry, so an
+    /// unchecked geometry would let a crafted image aim them at metadata or
+    /// past the device.
+    fn geometry_fits(&self, device_sectors: u64) -> bool {
+        let end = |start: u64, len: u64| start.checked_add(len);
+        let inode_blocks = u64::from(self.inode_count).div_ceil(INODES_PER_BLOCK as u64);
+        let bitmap_needed = self.total_blocks.div_ceil((SECTOR_SIZE * 8) as u64);
+        // Replay reads the descriptor, up to MAX_TXN_BLOCKS staged sectors and
+        // the commit sector, all inside the journal.
+        let journal_needed = MAX_TXN_BLOCKS as u64 + 2;
+        let (Some(journal_end), Some(bitmap_end), Some(inode_end)) = (
+            end(self.journal_start, u64::from(self.journal_blocks)),
+            end(self.bitmap_start, u64::from(self.bitmap_blocks)),
+            end(self.inode_start, inode_blocks),
+        ) else {
+            return false;
+        };
+        self.journal_start >= 2
+            && u64::from(self.journal_blocks) >= journal_needed
+            && journal_end <= self.bitmap_start
+            && u64::from(self.bitmap_blocks) >= bitmap_needed
+            && bitmap_end <= self.inode_start
+            && self.inode_count > 0
+            && inode_end <= self.data_start
+            && self.data_start < self.total_blocks
+            && self.total_blocks <= device_sectors
+            && (1..=u64::from(self.inode_count)).contains(&self.root_inode)
+    }
+
+    /// Whether a transaction may write `lba`: the bitmap, inode table and
+    /// data regions. The superblock slots are written only by the checkpoint
+    /// and the journal only by `commit` itself, so a staged target in either
+    /// would let one transaction overwrite a checkpoint or the very journal
+    /// sectors replay is still reading.
+    fn journal_may_target(&self, lba: u64) -> bool {
+        (self.bitmap_start..self.total_blocks).contains(&lba)
+    }
 }
 
 // -------------------------------------------------------------------- inode
@@ -449,10 +492,12 @@ impl DirEntry {
         }
     }
 
+    /// `name_len` comes from an unchecksummed directory block, so a value past
+    /// the name field must not match rather than index out of bounds.
     pub fn matches(&self, name: &str) -> bool {
         self.inode != 0
             && usize::from(self.name_len) == name.len()
-            && &self.name[..name.len()] == name.as_bytes()
+            && self.name.get(..name.len()) == Some(name.as_bytes())
     }
 
     pub fn name_str(&self) -> &str {
@@ -576,10 +621,15 @@ impl Transaction {
     }
 }
 
-fn staged_checksum(blocks: &[StagedBlock]) -> u64 {
-    blocks.iter().fold(0xcbf2_9ce4_8422_2325, |hash, block| {
-        fnv1a_seeded(hash, &block.data)
-    })
+/// Commit checksum over the descriptor's used bytes (header and target list),
+/// then every staged data sector. Covering the targets means a descriptor
+/// damaged after commit is discarded on replay rather than writing committed
+/// bytes to the wrong block.
+fn journal_checksum(descriptor: &[u8; SECTOR_SIZE], blocks: &[StagedBlock]) -> u64 {
+    let header = fnv1a(&descriptor[..24 + blocks.len() * 8]);
+    blocks
+        .iter()
+        .fold(header, |hash, block| fnv1a_seeded(hash, &block.data))
 }
 
 fn validate_journal_targets(sb: &SuperBlock, blocks: &[StagedBlock]) -> Result<(), Error> {
@@ -823,6 +873,7 @@ impl<D: BlockDevice> Volume<D> {
 
     /// Mount an existing volume, replaying any committed transaction.
     pub fn mount(mut device: D) -> Result<Self, Error> {
+        let device_sectors = device.sector_count();
         let mut best: Option<(u64, SuperBlock)> = None;
         for slot in 0..2u64 {
             let mut sector = [0u8; SECTOR_SIZE];
@@ -835,6 +886,11 @@ impl<D: BlockDevice> Volume<D> {
             let Some(candidate) = SuperBlock::decode(&sector) else {
                 continue;
             };
+            // A slot whose geometry does not fit is discarded exactly like a
+            // slot whose checksum fails.
+            if !candidate.geometry_fits(device_sectors) {
+                continue;
+            }
             if best.is_none_or(|(_, current)| candidate.sequence > current.sequence) {
                 best = Some((slot, candidate));
             }
@@ -1011,7 +1067,8 @@ impl<D: BlockDevice> Volume<D> {
         let mut commit = [0u8; SECTOR_SIZE];
         commit[..8].copy_from_slice(JOURNAL_COMMIT_MAGIC);
         commit[8..16].copy_from_slice(&transaction_id.to_le_bytes());
-        commit[16..24].copy_from_slice(&staged_checksum(&txn.blocks[..count]).to_le_bytes());
+        commit[16..24]
+            .copy_from_slice(&journal_checksum(&descriptor, &txn.blocks[..count]).to_le_bytes());
         self.device
             .write_sector(sb.journal_start + 1 + count as u64, &commit)?;
         self.device.flush()?;
@@ -1081,7 +1138,7 @@ impl<D: BlockDevice> Volume<D> {
         }
         let (lba, offset) = inode_location(&self.super_block, number);
         let sector = self.read_block(lba)?;
-        Inode::decode(&sector[offset..offset + INODE_SIZE]).ok_or(Error::Corrupt)
+        self.checked_inode(&sector[offset..offset + INODE_SIZE])
     }
 
     fn inode_staged(&mut self, txn: &Transaction, number: u64) -> Result<Inode, Error> {
@@ -1090,7 +1147,38 @@ impl<D: BlockDevice> Volume<D> {
         }
         let (lba, offset) = inode_location(&self.super_block, number);
         let sector = self.read_block_staged(txn, lba)?;
-        Inode::decode(&sector[offset..offset + INODE_SIZE]).ok_or(Error::Corrupt)
+        self.checked_inode(&sector[offset..offset + INODE_SIZE])
+    }
+
+    /// Decode an inode, refusing one whose block pointers leave the data
+    /// region.
+    ///
+    /// The inode checksum detects bit rot, not a mis-written or crafted image.
+    /// Writes reuse an inode's existing blocks in place and unlink clears their
+    /// bitmap bits, so a pointer at the superblock, journal, bitmap or inode
+    /// table would let file data overwrite metadata or free a metadata block.
+    /// Free inodes are checked too, because a stale directory entry can still
+    /// reach one through `unlink`. Two slots naming the same block are refused
+    /// too: a write would stage that block twice with different bytes, and a
+    /// shrink would free it while another slot still names it.
+    fn checked_inode(&self, raw: &[u8]) -> Result<Inode, Error> {
+        let node = Inode::decode(raw).ok_or(Error::Corrupt)?;
+        let sb = &self.super_block;
+        let in_data = |block: &u64| *block == 0 || (sb.data_start..sb.total_blocks).contains(block);
+        if !node.direct.iter().all(in_data) {
+            return Err(Error::Corrupt);
+        }
+        for (slot, block) in node.direct.iter().enumerate() {
+            if *block != 0 && node.direct[slot + 1..].contains(block) {
+                return Err(Error::Corrupt);
+            }
+        }
+        if node.is_used()
+            && (!matches!(node.kind, KIND_FILE | KIND_DIR) || node.size > MAX_FILE_SIZE as u64)
+        {
+            return Err(Error::Corrupt);
+        }
+        Ok(node)
     }
 
     fn stage_inode(
@@ -1125,6 +1213,50 @@ impl<D: BlockDevice> Volume<D> {
             sector[byte] &= !mask;
         }
         txn.stage(lba, &sector)
+    }
+
+    /// Stage `block` as free, refusing a block the bitmap already marks free.
+    ///
+    /// Only a block some inode still names is ever freed. A clear bit means the
+    /// allocator may already have handed it to another inode, which would then
+    /// lose a block it owns.
+    fn stage_free_block(&mut self, txn: &mut Transaction, block: u64) -> Result<(), Error> {
+        if !self.bitmap_get(txn, block)? {
+            return Err(Error::Corrupt);
+        }
+        self.stage_bitmap(txn, block, false)
+    }
+
+    /// Refuse `blocks` if a live inode other than `owner` names any of them.
+    ///
+    /// The bitmap records only that a block is allocated, not to whom, so two
+    /// inodes naming one allocated block (or a live inode naming a block the
+    /// bitmap calls free, which the allocator may hand out) pass every
+    /// per-inode check. Rewriting such a block in place would overwrite the
+    /// other owner's data, and freeing it would leave the other owner pointing
+    /// at a block the allocator can reuse. The scan reads the inode table
+    /// through `txn`, so inodes staged earlier in the same transaction count.
+    fn refuse_shared_blocks(
+        &mut self,
+        txn: &Transaction,
+        owner: u64,
+        blocks: &[u64],
+    ) -> Result<(), Error> {
+        for number in 1..=u64::from(self.super_block.inode_count) {
+            if number == owner {
+                continue;
+            }
+            let other = self.inode_staged(txn, number)?;
+            if other.is_used()
+                && other
+                    .direct
+                    .iter()
+                    .any(|block| *block != 0 && blocks.contains(block))
+            {
+                return Err(Error::Corrupt);
+            }
+        }
+        Ok(())
     }
 
     fn allocate_block(&mut self, txn: &mut Transaction) -> Result<u64, Error> {
@@ -1292,7 +1424,16 @@ impl<D: BlockDevice> Volume<D> {
             .iter()
             .find(|entry| entry.matches(name))
             .copied()
-            .ok_or(Error::NotFound)
+            .ok_or(Error::NotFound)?;
+        // A stale entry may name a free inode (e.g. after a crash before the
+        // directory entry was cleared). `check()` flags this as corrupt; refuse
+        // it here so callers never operate on a freed inode.
+        if entry.inode > u64::from(self.super_block.inode_count)
+            || !self.inode(entry.inode)?.is_used()
+        {
+            return Err(Error::Corrupt);
+        }
+        Ok(entry)
     }
 
     /// Entries of a directory, free slots included as `inode == 0`.
@@ -1302,12 +1443,35 @@ impl<D: BlockDevice> Volume<D> {
         if dir.kind != KIND_DIR {
             return Err(Error::NotADirectory);
         }
-        self.dir_entries(&txn, &dir)
+        let mut view = self.dir_entries(&txn, &dir)?;
+        // Mirror the guard in `lookup()`: a non-zero inode that is out of range
+        // or whose mode is 0 is a stale entry.  Zero it so callers using
+        // `live()` or `count()` see a consistent picture.
+        for entry in view.entries.iter_mut() {
+            if entry.inode != 0 {
+                let valid = self
+                    .inode(entry.inode)
+                    .map(|n| n.is_used())
+                    .unwrap_or(false);
+                if !valid {
+                    *entry = DirEntry::empty();
+                }
+            }
+        }
+        Ok(view)
     }
 
+    /// Stage one entry of directory `dir_inode` (whose inode is `dir`).
+    ///
+    /// The entry's block is rewritten in place, so it gets the same ownership
+    /// checks as a file block rewritten by `stage_write`. A file inode naming
+    /// that block would otherwise have its data overwritten by a `create` or
+    /// `unlink` that never touches the file, and a block the bitmap calls free
+    /// may already belong to someone else.
     fn stage_dir_entry(
         &mut self,
         txn: &mut Transaction,
+        dir_inode: u64,
         dir: &Inode,
         position: usize,
         entry: &DirEntry,
@@ -1315,9 +1479,10 @@ impl<D: BlockDevice> Volume<D> {
         let slot = position / DIR_ENTRIES_PER_BLOCK;
         let index = position % DIR_ENTRIES_PER_BLOCK;
         let block = dir.direct[slot];
-        if block == 0 {
+        if block == 0 || !self.bitmap_get(txn, block)? {
             return Err(Error::Corrupt);
         }
+        self.refuse_shared_blocks(txn, dir_inode, &[block])?;
         let mut sector = self.read_block_staged(txn, block)?;
         let at = index * DIR_ENTRY_SIZE;
         entry.encode(&mut sector[at..at + DIR_ENTRY_SIZE]);
@@ -1478,6 +1643,9 @@ impl<D: BlockDevice> Volume<D> {
             return Err(Error::NotADirectory);
         }
 
+        // Every block this write rewrites, frees or newly takes.
+        let mut touched = [0u64; 2 * DIRECT_BLOCKS];
+        touched[..DIRECT_BLOCKS].copy_from_slice(&node.direct);
         let needed = data.len().div_ceil(SECTOR_SIZE);
         for slot in 0..DIRECT_BLOCKS {
             if slot < needed {
@@ -1496,6 +1664,9 @@ impl<D: BlockDevice> Volume<D> {
                 node.direct[slot] = 0;
             }
         }
+
+        touched[DIRECT_BLOCKS..].copy_from_slice(&node.direct);
+        self.refuse_shared_blocks(txn, inode, &touched)?;
 
         node.size = data.len() as u64;
         node.modified = now;
@@ -1540,11 +1711,17 @@ impl<D: BlockDevice> Volume<D> {
     /// Read a file's contents into `out`, returning the byte count.
     ///
     /// Fails closed on a content checksum mismatch rather than returning bytes
-    /// that do not match what was written.
+    /// that do not match what was written. Refuses a directory inode the same
+    /// way `write_file` does: directory blocks are raw entry tables, and a
+    /// directory's `data_checksum` is never maintained, so a crafted value
+    /// would otherwise export the entry table as file contents.
     pub fn read_file(&mut self, inode: u64, out: &mut [u8]) -> Result<usize, Error> {
         let node = self.inode(inode)?;
         if !node.is_used() {
             return Err(Error::NotFound);
+        }
+        if node.kind != KIND_FILE {
+            return Err(Error::NotADirectory);
         }
         let size = node.size as usize;
         if out.len() < size {
@@ -1564,7 +1741,10 @@ impl<D: BlockDevice> Volume<D> {
             out[copied..copied + take].copy_from_slice(&sector[..take]);
             copied += take;
         }
-        if fnv1a(&out[..size]) != node.data_checksum {
+        // An empty file is created by `stage_create` with `data_checksum = 0`,
+        // not the FNV-1a initial value; the checksum has no meaning until the
+        // first write. `check()` documents and respects the same invariant.
+        if size > 0 && fnv1a(&out[..size]) != node.data_checksum {
             return Err(Error::Corrupt);
         }
         Ok(size)
@@ -1588,6 +1768,27 @@ impl<D: BlockDevice> Volume<D> {
             return Err(Error::NotFound);
         };
 
+        // Directory blocks carry no checksum. Before freeing anything, require
+        // that the entry names a live file inode and is the only entry that
+        // does. An entry naming the directory would free the directory's own
+        // blocks, and a second entry naming the same inode would be left
+        // pointing at whatever file next reuses that inode number.
+        if entry.inode == dir_inode
+            || entry.inode > u64::from(self.super_block.inode_count)
+            || view
+                .entries
+                .iter()
+                .filter(|other| other.inode == entry.inode)
+                .count()
+                != 1
+        {
+            return Err(Error::Corrupt);
+        }
+        // WovenFS has no hard links: create writes `links = 1` and nothing
+        // changes it. Any other count means some other name may still reach
+        // the inode (or the image is crafted), and freeing the blocks would
+        // destroy that file's data. Fail closed rather than guess; supporting
+        // hard links later means decrementing here instead of freeing.
         let mut node = self.inode_staged(&txn, entry.inode)?;
         if node.kind == KIND_DIR {
             let children = self.dir_entries(&txn, &node)?;
@@ -1598,7 +1799,7 @@ impl<D: BlockDevice> Volume<D> {
         for slot in 0..DIRECT_BLOCKS {
             if node.direct[slot] != 0 {
                 let block = node.direct[slot];
-                self.stage_bitmap(&mut txn, block, false)?;
+                self.stage_free_block(&mut txn, block)?;
                 node.direct[slot] = 0;
             }
         }
@@ -1606,7 +1807,7 @@ impl<D: BlockDevice> Volume<D> {
             self.stage_bitmap(&mut txn, node.xattr_block, false)?;
         }
         self.stage_inode(&mut txn, entry.inode, &Inode::empty())?;
-        self.stage_dir_entry(&mut txn, &dir, position, &DirEntry::empty())?;
+        self.stage_dir_entry(&mut txn, dir_inode, &dir, position, &DirEntry::empty())?;
         dir.modified = now;
         self.stage_inode(&mut txn, dir_inode, &dir)?;
         self.commit(&txn)
@@ -1827,13 +2028,131 @@ impl<D: BlockDevice> Volume<D> {
     pub fn check(&mut self) -> Result<(), Error> {
         let sb = self.super_block;
         let txn = Transaction::new();
-        let mut seen = [0u64; 64];
-        let mut seen_len = 0usize;
+
+        // `format()` always hardcodes `sb.root_inode = 1`. The checkpoint
+        // mechanism records the superblock verbatim: no commit, write, create,
+        // or unlink path ever modifies `root_inode` after format.  Any value
+        // other than 1 is therefore corruption the runtime cannot have produced.
+        // `SuperBlock::valid()` only requires `root_inode` in `1..=inode_count`,
+        // so a crafted value such as 2 passes `mount()` while silently
+        // misdirecting every root-section check below to examine the wrong inode.
+        if sb.root_inode != 1 {
+            return Err(Error::Corrupt);
+        }
 
         for number in 1..=u64::from(sb.inode_count) {
             let node = self.inode(number)?;
             if !node.is_used() {
+                // `Inode::empty()` zeroes every field.  `format()` zeroes
+                // inode slots directly (no encode call), and `stage_unlink`
+                // writes `Inode::empty()` to free an occupied slot.  No
+                // runtime path can therefore leave non-zero `links`, `size`,
+                // `created`, `modified`, `data_checksum`, `kind`, or any
+                // `direct` entry in a free inode (mode == 0).  A crafted
+                // image with a resealed structural checksum passes
+                // `Inode::decode()` while hiding these values from every
+                // per-field check above, so without an explicit guard here
+                // the corruption goes unnoticed.
+                if node.links != 0
+                    || node.size != 0
+                    || node.created != 0
+                    || node.modified != 0
+                    || node.data_checksum != 0
+                    || node.kind != 0
+                    || node.direct.iter().any(|&b| b != 0)
+                {
+                    return Err(Error::Corrupt);
+                }
                 continue;
+            }
+            // Only KIND_FILE (1) and KIND_DIR (2) are defined.  `stage_create`
+            // allocates only KIND_FILE inodes; `format()` writes exactly one
+            // KIND_DIR inode (the root).  Any other value is corruption that no
+            // runtime path can produce.  All downstream guards are gated on
+            // `node.kind == KIND_FILE` or `node.kind == KIND_DIR`, so an unknown
+            // kind slips through every check — the KIND_FILE guards are skipped,
+            // the orphan-inode scan at the end skips non-KIND_FILE inodes, and
+            // the bitmap→inode check sees no named blocks to verify.
+            if !matches!(node.kind, KIND_FILE | KIND_DIR) {
+                return Err(Error::Corrupt);
+            }
+            // `mkdir` is not implemented: this is a flat, single-directory
+            // filesystem.  The only valid KIND_DIR inode is the root
+            // (sb.root_inode).  A live inode with kind == KIND_DIR and a number
+            // other than the root is corruption that `stage_create` cannot
+            // produce — it only allocates KIND_FILE inodes and there is no
+            // directory-creation path.  The orphan-inode scan at the end of
+            // this function skips non-KIND_FILE inodes, so without this guard a
+            // phantom directory inode passes check() silently.
+            if node.kind == KIND_DIR && number != sb.root_inode {
+                return Err(Error::Corrupt);
+            }
+            if node.kind == KIND_FILE && node.links != 1 {
+                return Err(Error::Corrupt);
+            }
+            // `stage_create` initialises every new file with `data_checksum = 0`
+            // (via `Inode::empty()`).  The field is only updated by `stage_write`
+            // after the first write.  A size-zero file with a non-zero
+            // `data_checksum` is impossible to produce through any runtime path;
+            // `read_file` silently skips the checksum comparison for size-zero
+            // files, so neither the read path nor the earlier structural checks
+            // would surface this inconsistency without an explicit guard here.
+            if node.kind == KIND_FILE && node.size == 0 && node.data_checksum != 0 {
+                return Err(Error::Corrupt);
+            }
+            // `stage_write` and `create_file` both enforce `data.len() <=
+            // MAX_FILE_SIZE` (the maximum bytes eight direct blocks can hold).
+            // No runtime path can therefore write a file inode with a size
+            // beyond that limit.  Without an explicit guard the block-count
+            // check below computes `needed = size.div_ceil(SECTOR_SIZE)`, which
+            // can exceed `DIRECT_BLOCKS` for an oversized `size`; the later
+            // data-checksum loop (`for slot in 0..needed { node.direct[slot] }`)
+            // would then index past the eight-element `direct` array and panic.
+            if node.kind == KIND_FILE && node.size > MAX_FILE_SIZE as u64 {
+                return Err(Error::Corrupt);
+            }
+            // `stage_write` allocates exactly one block per sector of content
+            // and zeroes every slot beyond the last.  A missing block makes the
+            // file unreadable (`read_file` returns Corrupt on a zero slot); an
+            // extra block beyond the file size is a resource leak that no
+            // runtime path reclaims.  Both are inconsistent with the write
+            // invariant, so flag them here.
+            if node.kind == KIND_FILE {
+                let needed = (node.size as usize).div_ceil(SECTOR_SIZE);
+                for slot in 0..DIRECT_BLOCKS {
+                    if (node.direct[slot] != 0) != (slot < needed) {
+                        return Err(Error::Corrupt);
+                    }
+                }
+            }
+            // `read_file` verifies file content against `data_checksum` on
+            // every read, so `check()` must catch the same mismatch.  A file
+            // whose data blocks were silently overwritten on disk (with the
+            // inode checksum left intact) would pass every structural check
+            // above but fail when read — the oracle-vs-runtime gap this
+            // closes.  The checksum is computed the same way as in
+            // `stage_write`: FNV-1a over the raw content bytes, chained
+            // block by block through `fnv1a_seeded` so no allocation is
+            // needed.  Size 0 has no blocks to read and no checksum to verify
+            // (the runtime creates 0-size files with a zeroed checksum field
+            // via `stage_create`, not `stage_write`).
+            if node.kind == KIND_FILE && node.size > 0 {
+                let size = node.size as usize;
+                let needed = size.div_ceil(SECTOR_SIZE);
+                let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+                for slot in 0..needed {
+                    let block = node.direct[slot];
+                    let sector = self.read_block(block)?;
+                    let tail = if slot + 1 == needed && !size.is_multiple_of(SECTOR_SIZE) {
+                        size % SECTOR_SIZE
+                    } else {
+                        SECTOR_SIZE
+                    };
+                    hash = fnv1a_seeded(hash, &sector[..tail]);
+                }
+                if hash != node.data_checksum {
+                    return Err(Error::Corrupt);
+                }
             }
             for slot in 0..DIRECT_BLOCKS {
                 let block = node.direct[slot];
@@ -1846,12 +2165,34 @@ impl<D: BlockDevice> Volume<D> {
                 if !self.bitmap_get(&txn, block)? {
                     return Err(Error::Corrupt);
                 }
-                if seen[..seen_len].contains(&block) {
-                    return Err(Error::Corrupt);
-                }
-                if seen_len < seen.len() {
-                    seen[seen_len] = block;
-                    seen_len += 1;
+            }
+            // No other live inode may name any of this inode's blocks. A block
+            // repeated within one inode is already refused by `checked_inode`
+            // (via `self.inode` above); here we reuse the write path's
+            // `refuse_shared_blocks` so the verifier shares one definition of
+            // the cross-inode rule. The former fixed-size `seen` set stopped
+            // recording after 64 distinct blocks, so an alias involving any
+            // later block went unseen and this verifier could call a corrupt
+            // image clean; this scan has no such bound.
+            self.refuse_shared_blocks(&txn, number, &node.direct)?;
+        }
+
+        // Every data block the bitmap marks allocated must be named by exactly
+        // one live inode.  The per-inode loop above already checks the converse:
+        // every inode-named block has its bitmap bit set.  A block the bitmap
+        // calls allocated that no live inode names is a leaked resource — the
+        // allocator will never hand it out again, so the space is permanently
+        // lost and the bitmap disagrees with the inode table.
+        for block in sb.data_start..sb.total_blocks {
+            if !self.bitmap_get(&txn, block)? {
+                continue;
+            }
+            let mut named = false;
+            'search: for number in 1..=u64::from(sb.inode_count) {
+                let node = self.inode(number)?;
+                if node.is_used() && node.direct.contains(&block) {
+                    named = true;
+                    break 'search;
                 }
             }
             #[cfg(any(test, feature = "stage12-2-xattr-test"))]
@@ -1875,6 +2216,18 @@ impl<D: BlockDevice> Volume<D> {
         }
 
         let root = self.inode(sb.root_inode)?;
+        // `format()` hardcodes `root.mode = 0o040_755` and no runtime path
+        // ever modifies a directory inode's `mode` field: `stage_create` sets
+        // `mode` only on freshly allocated file inodes, not on the directory.
+        // Any value other than `0o040_755` is corruption that `format()` cannot
+        // have produced.  A mode of zero is already caught by the bitmap orphan
+        // scan (root_block would appear allocated but unnamed by a live inode),
+        // but any non-zero invalid mode evades every earlier check — the inode
+        // is still "live", its block passes the bitmap scan, and no structural
+        // check compares this field against the format constant without this guard.
+        if root.mode != 0o040_755 {
+            return Err(Error::Corrupt);
+        }
         if root.kind != KIND_DIR {
             return Err(Error::Corrupt);
         }
