@@ -1,12 +1,13 @@
-## Copilot - Phase B/master reconciliation (2026-11-27) - ACTIVE
+## Copilot - Phase B/master reconciliation (2026-11-27) - DONE
 
 Reconciling `origin/phase-b/bottom-taskbar-core` into `origin/master` in the
 isolated `master-reconcile` worktree. The merge retains Phase B desktop, USB,
 release and settings behavior while preserving master's exact-source release
 provenance and native WovenFS atomic journal path. Validation is focused:
 formatting, Python release/hardware contracts, settings policy tests, geometry
-contracts, host all-target Clippy and the large-map kernel feature lint. Other
-acceptance chains are not claimed by this reconciliation.
+contracts, host all-target Clippy and the large-map kernel feature lint. The
+exact merged source then passed `RUN-STAGE10.7.ps1` after also passing
+warning-denying all-target Clippy and the full workspace test suite.
 
 ## Copilot - filesystem/release/desktop gap closure (2026-11-27) - DONE
 

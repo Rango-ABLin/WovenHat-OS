@@ -7,8 +7,9 @@ reconciled with master's newer exact-source validation and native WovenFS
 atomic transaction implementation. Conflicting records are retained newest
 first. Focused Python contracts, settings policy, standalone shell geometry,
 host warning-denying Clippy and the new large-map kernel feature lint pass.
-The full Stage 10.7/QEMU preservation chain was not rerun by this merge
-reconciliation and is not claimed as fresh evidence.
+The exact merged source then passed the full `RUN-STAGE10.7.ps1` Windows
+acceptance chain, in addition to warning-denying all-target Clippy and the
+workspace test suite.
 
 ## Audited filesystem, release and desktop gaps - 2026-11-27 - ACCEPTED (BOUNDED)
 
