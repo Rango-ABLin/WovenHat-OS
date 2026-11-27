@@ -1,3 +1,10 @@
+## Copilot - remaining remote-branch comparison (2026-11-27)
+
+Comparing the remaining requested feature, fix, integration, security and
+stage branch histories against master, including conflict areas and newer
+accepted changes. Coordinate before modifying master or those remote tips.
+No physical devices or firmware are involved.
+
 ## Copilot - remote branch reconciliation (2026-11-27)
 
 Reconciled the requested remote feature, fix, integration, security and stage
