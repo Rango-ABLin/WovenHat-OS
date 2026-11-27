@@ -241,8 +241,6 @@ fn transaction_preflight_rejects_reserved_bitmap_target_without_writes() {
 
 #[test]
 fn replay_rejects_reserved_journal_targets_without_touching_metadata() {
-    // A forged descriptor plus matching transaction ID must not be allowed
-    // to overwrite the superblock pair or the journal's own sectors.
     for target_kind in 0..3 {
         let disk = formatted();
         let sb = {
@@ -258,19 +256,7 @@ fn replay_rejects_reserved_journal_targets_without_touching_metadata() {
             let image = disk.image.borrow();
             [image[0], image[1]]
         };
-        {
-            let mut image = disk.image.borrow_mut();
-            let mut descriptor = [0u8; SECTOR_SIZE];
-            descriptor[..8].copy_from_slice(wfs::JOURNAL_DESC_MAGIC);
-            descriptor[8..16].copy_from_slice(&999_u64.to_le_bytes());
-            descriptor[16..20].copy_from_slice(&1_u32.to_le_bytes());
-            descriptor[24..32].copy_from_slice(&target.to_le_bytes());
-            image[sb.journal_start as usize] = descriptor;
-            let mut commit = [0u8; SECTOR_SIZE];
-            commit[..8].copy_from_slice(wfs::JOURNAL_COMMIT_MAGIC);
-            commit[8..16].copy_from_slice(&999_u64.to_le_bytes());
-            image[(sb.journal_start + 2) as usize] = commit;
-        }
+        forge_committed_journal(&disk, &[target], true);
         assert!(
             matches!(Volume::mount(disk.clone()), Err(Error::Corrupt)),
             "reserved target {target} must be refused"
@@ -289,20 +275,7 @@ fn replay_rejects_duplicate_destination_before_any_write() {
     };
     let destination = sb.data_start;
     let original = disk.sectors()[destination as usize];
-    {
-        let mut image = disk.image.borrow_mut();
-        let mut descriptor = [0u8; SECTOR_SIZE];
-        descriptor[..8].copy_from_slice(wfs::JOURNAL_DESC_MAGIC);
-        descriptor[8..16].copy_from_slice(&1000_u64.to_le_bytes());
-        descriptor[16..20].copy_from_slice(&2_u32.to_le_bytes());
-        descriptor[24..32].copy_from_slice(&destination.to_le_bytes());
-        descriptor[32..40].copy_from_slice(&destination.to_le_bytes());
-        image[sb.journal_start as usize] = descriptor;
-        let mut commit = [0u8; SECTOR_SIZE];
-        commit[..8].copy_from_slice(wfs::JOURNAL_COMMIT_MAGIC);
-        commit[8..16].copy_from_slice(&1000_u64.to_le_bytes());
-        image[(sb.journal_start + 3) as usize] = commit;
-    }
+    forge_committed_journal(&disk, &[destination, destination], true);
     assert!(matches!(Volume::mount(disk.clone()), Err(Error::Corrupt)));
     assert_eq!(disk.sectors()[destination as usize], original);
 }
