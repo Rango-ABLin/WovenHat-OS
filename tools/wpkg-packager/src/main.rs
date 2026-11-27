@@ -175,6 +175,7 @@ fn main() {
         process::exit(2);
     }
 
+    eprintln!("[WPKG-DIAG] read application");
     let application = fs::read(&input).expect("failed to read application ELF");
     if application.is_empty()
         || application.len() as u64 > MAX_APPLICATION_BYTES
@@ -192,6 +193,7 @@ fn main() {
         process::exit(2);
     }
 
+    eprintln!("[WPKG-DIAG] build manifest");
     let mut manifest = Vec::new();
     manifest.push(name.len() as u8);
     manifest.extend_from_slice(name.as_bytes());

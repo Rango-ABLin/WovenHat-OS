@@ -85,9 +85,11 @@ pub const MAX_IO_SIZE: usize = 1024;
 pub const MAX_VFS_NODES: usize = 64;
 
 /// Capacity of each VFS node data buffer (bytes). This is also the largest
-/// executable image `exec` reads from the VFS. The system-app catalog now
-/// includes the signed WovenImages package (166,248 bytes), so the capacity
-/// must cover that package while remaining a bounded per-node allocation.
+/// executable image `exec` reads from the VFS. Production signed system-app
+/// packages can exceed 128 KiB (the signed WovenImages package is 166,248
+/// bytes), so the capacity must cover it while remaining a bounded per-node
+/// allocation. Keep this at 256 KiB until dynamic VFS payload allocation
+/// removes the fixed per-node ceiling.
 /// Never put a buffer of this size on a kernel stack.
 pub const VFS_NODE_CAPACITY: usize = 256 * 1024;
 
