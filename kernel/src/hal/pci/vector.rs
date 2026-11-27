@@ -13,7 +13,7 @@ const NO_OWNER: u32 = 0;
 pub struct Lease {
     pub vector: u8,
     generation: u32,
-    pub(super) owner: u32,
+    owner: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

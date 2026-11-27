@@ -737,46 +737,6 @@ pub fn enable_pci_interrupt(
         .map_err(PciInterruptError::Msi)
 }
 
-/// Send an end-of-interrupt for the input interrupt if a lease exists. This is
-/// best-effort: the caller checks the returned value.
-pub fn pci_interrupt_ack(
-    lease_slot: &Mutex<Option<PciInterruptLease>>,
-    _vector: u8,
-) -> bool {
-    let Some(lease) = *lease_slot.lock() else {
-        return false;
-    };
-    match lease {
-        PciInterruptLease::Msi(lease) => crate::hal::pci::ack_msi(lease),
-        PciInterruptLease::Msix(_) => {}
-    }
-    true
-}
-
-/// Mask the input interrupt (best-effort). Returns true if the device could
-/// be masked or if there is no lease.
-pub fn pci_interrupt_mask(lease_slot: &Mutex<Option<PciInterruptLease>>) -> bool {
-    let Some(lease) = *lease_slot.lock() else {
-        return true;
-    };
-    match lease {
-        PciInterruptLease::Msi(lease) => crate::hal::pci::mask_owned_msi(lease),
-        PciInterruptLease::Msix(_) => true,
-    }
-}
-
-/// Unmask the input interrupt (best-effort). Returns true if the device could
-/// be unmasked or if there is no lease.
-pub fn pci_interrupt_unmask(lease_slot: &Mutex<Option<PciInterruptLease>>) -> bool {
-    let Some(lease) = *lease_slot.lock() else {
-        return true;
-    };
-    match lease {
-        PciInterruptLease::Msi(lease) => crate::hal::pci::unmask_owned_msi(lease),
-        PciInterruptLease::Msix(_) => true,
-    }
-}
-
 pub fn attach_pci_msi(
     name: &'static str,
     lease: crate::hal::pci::MsiLease,

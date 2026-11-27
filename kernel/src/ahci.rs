@@ -12,10 +12,9 @@ use core::{
 
 use crate::{
     block::{BlockDevice, Error, SECTOR_SIZE},
-    dma::DmaPage,
     hal::pci::{self, Address, BarKind},
     irq_lock::IrqMutex as Mutex,
-    paging,
+    memory, paging,
 };
 
 const AHCI_CLASS: u8 = 0x01;
@@ -73,6 +72,50 @@ pub enum InitError {
     UnsupportedDevice,
 }
 
+struct DmaPage {
+    physical: u64,
+    virtual_address: u64,
+}
+
+impl Drop for DmaPage {
+    fn drop(&mut self) {
+        if let Ok(frame) = x86_64::structures::paging::PhysFrame::from_start_address(
+            x86_64::PhysAddr::new(self.physical),
+        ) {
+            // A failed controller initialization must not permanently consume
+            // allocator frames.  Once the page owner is dropped, no command
+            // has been submitted that can still reference it.
+            let _ = memory::deallocate_frame(frame);
+        }
+    }
+}
+
+impl DmaPage {
+    fn allocate_zeroed() -> Option<Self> {
+        let frame = memory::allocate_contiguous_frames(1)?;
+        let physical = frame.start_address().as_u64();
+        let Some(offset) = paging::physical_memory_offset() else {
+            let _ = memory::deallocate_frame(frame);
+            return None;
+        };
+        let Some(virtual_address) = offset.checked_add(physical) else {
+            let _ = memory::deallocate_frame(frame);
+            return None;
+        };
+        // SAFETY: this page is exclusively owned by the AHCI driver.
+        unsafe { ptr::write_bytes(virtual_address as *mut u8, 0, PAGE_SIZE) };
+        Some(Self {
+            physical,
+            virtual_address,
+        })
+    }
+
+    fn bytes_mut(&mut self) -> &mut [u8; PAGE_SIZE] {
+        // SAFETY: controller access is serialized by CONTROLLER.
+        unsafe { &mut *(self.virtual_address as *mut [u8; PAGE_SIZE]) }
+    }
+}
+
 pub struct AhciDisk {
     address: Address,
     original_command: u16,
@@ -81,40 +124,7 @@ pub struct AhciDisk {
     command_list: DmaPage,
     _received_fis: DmaPage,
     command_table: DmaPage,
-    transfer: OwnedDmaBuffer,
-}
-
-/// One transfer page that goes CPU -> device for the duration of one command
-/// and back to CPU on completion. Command tables and FIS rings are shared and
-/// are not wrapped; see the module note above.
-pub struct OwnedDmaBuffer {
-    page: DmaPage,
-}
-
-impl OwnedDmaBuffer {
-    /// The page is allocated, zeroed and owned by the CPU.
-    fn claim(&mut self) -> Result<(), InitError> {
-        self.page
-            .hand_to_device(u64::MAX)
-            .map_err(|_| InitError::DeviceFault)?;
-        Ok(())
-    }
-
-    /// Release the device after the command completes.
-    fn release(&mut self) -> Result<(), InitError> {
-        self.page
-            .reclaim()
-            .map_err(|_| InitError::DeviceFault)?;
-        Ok(())
-    }
-
-    pub fn physical_address(&self) -> u64 {
-        self.page.physical_address()
-    }
-
-    fn bytes_mut(&mut self) -> &mut [u8; PAGE_SIZE] {
-        self.page.bytes_mut()
-    }
+    transfer: DmaPage,
 }
 
 impl AhciDisk {
@@ -137,18 +147,10 @@ impl AhciDisk {
         mmio_write32(hba + HBA_GHC, ghc | GHC_AE)?;
         let implemented = mmio_read32(hba + HBA_PI)?;
 
-        let command_list = DmaPage::allocate_zeroed().map_err(|_| InitError::DmaUnavailable)?;
-        let received_fis = DmaPage::allocate_zeroed().map_err(|_| InitError::DmaUnavailable)?;
-        let command_table = DmaPage::allocate_zeroed().map_err(|_| InitError::DmaUnavailable)?;
-        let transfer =
-            OwnedDmaBuffer { page: DmaPage::allocate_zeroed().map_err(|_| InitError::DmaUnavailable)? };
-
-        // The controller, not Rust, writes the received FIS ring and command
-        // table, so those pages are device-shared throughout the controller's
-        // lifetime. The shared page has an explicit CPU-only owner, so hand them
-        // back with `hand_to_device` and note that teardown is needed.
-        let command_list_address = command_list.physical_address();
-        let received_fis_address = received_fis.physical_address();
+        let command_list = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
+        let received_fis = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
+        let command_table = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
+        let transfer = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
 
         // Take each port over from the firmware, which may have stopped it
         // (so its signature reads all ones) or left its link in a
@@ -167,10 +169,10 @@ impl AhciDisk {
             if stop_engine(port).is_err() {
                 continue;
             }
-            mmio_write32(port + PX_CLB, command_list_address as u32)?;
-            mmio_write32(port + PX_CLBU, (command_list_address >> 32) as u32)?;
-            mmio_write32(port + PX_FB, received_fis_address as u32)?;
-            mmio_write32(port + PX_FBU, (received_fis_address >> 32) as u32)?;
+            mmio_write32(port + PX_CLB, command_list.physical as u32)?;
+            mmio_write32(port + PX_CLBU, (command_list.physical >> 32) as u32)?;
+            mmio_write32(port + PX_FB, received_fis.physical as u32)?;
+            mmio_write32(port + PX_FBU, (received_fis.physical >> 32) as u32)?;
             mmio_write32(port + PX_CMD, mmio_read32(port + PX_CMD)? | CMD_FRE)?;
             if !(link_active(port)? && mmio_read32(port + PX_SIG)? == SATA_SIG_ATA) {
                 reset_port(port)?;
@@ -208,16 +210,15 @@ impl AhciDisk {
         let stopped = stop_engine(self.port).is_ok();
         let _ = mmio_write32(self.port + PX_IE, 0);
         let _ = mmio_write32(self.port + PX_IS, u32::MAX);
-        let transfer_released = self.transfer.release().is_ok();
         let command = pci::restore_command(self.address, self.original_command);
-        if stopped && command && transfer_released {
+        if stopped && command {
             Ok(())
         } else {
             Err(InitError::PortTimeout)
         }
     }
 
-    fn prepare_command(&mut self, write: bool, byte_count: usize) -> Result<(), InitError> {
+    fn prepare_command(&mut self, write: bool, byte_count: usize) {
         self.command_list.bytes_mut().fill(0);
         self.command_table.bytes_mut().fill(0);
 
@@ -226,16 +227,13 @@ impl AhciDisk {
         let flags = cfl | if write { 1 << 6 } else { 0 };
         header[0..2].copy_from_slice(&flags.to_le_bytes());
         header[2..4].copy_from_slice(&1_u16.to_le_bytes());
-        let command_table_address = self.command_table.physical_address();
-        header[8..12].copy_from_slice(&(command_table_address as u32).to_le_bytes());
-        header[12..16].copy_from_slice(&((command_table_address >> 32) as u32).to_le_bytes());
+        header[8..12].copy_from_slice(&(self.command_table.physical as u32).to_le_bytes());
+        header[12..16].copy_from_slice(&((self.command_table.physical >> 32) as u32).to_le_bytes());
 
-        let transfer_address = self.transfer.physical_address();
         let table = self.command_table.bytes_mut();
-        table[0x80..0x84].copy_from_slice(&(transfer_address as u32).to_le_bytes());
-        table[0x84..0x88].copy_from_slice(&((transfer_address >> 32) as u32).to_le_bytes());
+        table[0x80..0x84].copy_from_slice(&(self.transfer.physical as u32).to_le_bytes());
+        table[0x84..0x88].copy_from_slice(&((self.transfer.physical >> 32) as u32).to_le_bytes());
         table[0x8c..0x90].copy_from_slice(&((byte_count as u32).saturating_sub(1)).to_le_bytes());
-        Ok(())
     }
 
     fn issue(
@@ -246,23 +244,7 @@ impl AhciDisk {
         write: bool,
         bytes: usize,
     ) -> Result<(), InitError> {
-        if self.transfer.claim().is_err() {
-            return Err(InitError::DeviceFault);
-        }
-        let result = self.issue_claimed(command, lba, sectors, write, bytes);
-        let released = self.transfer.release();
-        result.and(released)
-    }
-
-    fn issue_claimed(
-        &mut self,
-        command: u8,
-        lba: u64,
-        sectors: u16,
-        write: bool,
-        bytes: usize,
-    ) -> Result<(), InitError> {
-        self.prepare_command(write, bytes)?;
+        self.prepare_command(write, bytes);
         let table = self.command_table.bytes_mut();
         table[0] = FIS_TYPE_REG_H2D;
         table[1] = 1 << 7;
@@ -296,19 +278,8 @@ impl AhciDisk {
     }
 
     fn identify(&mut self) -> Result<(), InitError> {
-        let claimed = self.transfer.claim();
-        if claimed.is_ok() {
-            let result = self.identify_locked();
-            let released = self.transfer.release().map_err(|_| InitError::DeviceFault);
-            result.and(released)
-        } else {
-            claimed
-        }
-    }
-
-    fn identify_locked(&mut self) -> Result<(), InitError> {
         self.transfer.bytes_mut().fill(0);
-        self.issue_claimed(ATA_IDENTIFY, 0, 0, false, SECTOR_SIZE)?;
+        self.issue(ATA_IDENTIFY, 0, 0, false, SECTOR_SIZE)?;
         let words = self.transfer.bytes_mut();
         let command_set = u16::from_le_bytes([words[166], words[167]]);
         if command_set & (1 << 10) == 0 {
@@ -332,35 +303,27 @@ impl AhciDisk {
         if lba >= self.sectors {
             return Err(Error::OutOfBounds);
         }
-        let claimed = self.transfer.claim();
-        let result = if claimed.is_ok() {
+        if write {
+            self.transfer.bytes_mut()[..SECTOR_SIZE].copy_from_slice(sector);
+            fence(Ordering::Release);
+        }
+        self.issue(
             if write {
-                self.transfer.bytes_mut()[..SECTOR_SIZE].copy_from_slice(sector);
-                fence(Ordering::Release);
-            }
-            let issued = self
-                .issue_claimed(
-                    if write {
-                        ATA_WRITE_DMA_EXT
-                    } else {
-                        ATA_READ_DMA_EXT
-                    },
-                    lba,
-                    1,
-                    write,
-                    SECTOR_SIZE,
-                )
-                .map_err(|_| Error::DeviceFault);
-            if issued.is_ok() && !write {
-                fence(Ordering::Acquire);
-                sector.copy_from_slice(&self.transfer.bytes_mut()[..SECTOR_SIZE]);
-            }
-            issued.map_err(|_| Error::DeviceFault)
-        } else {
-            claimed.map_err(|_| Error::DeviceFault)
-        };
-        let released = self.transfer.release().map_err(|_| Error::DeviceFault);
-        result.and(released)
+                ATA_WRITE_DMA_EXT
+            } else {
+                ATA_READ_DMA_EXT
+            },
+            lba,
+            1,
+            write,
+            SECTOR_SIZE,
+        )
+        .map_err(|_| Error::DeviceFault)?;
+        fence(Ordering::Acquire);
+        if !write {
+            sector.copy_from_slice(&self.transfer.bytes_mut()[..SECTOR_SIZE]);
+        }
+        Ok(())
     }
 }
 

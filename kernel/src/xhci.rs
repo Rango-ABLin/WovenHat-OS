@@ -1712,9 +1712,8 @@ impl XhciController {
         &mut self,
         reports: &mut [(HidKind, usize, [u8; MAX_REPORT]); REPORTS_PER_PASS],
     ) -> usize {
-        // Acknowledge the xHCI interrupter first so an event written while
-        // draining raises a fresh interrupt rather than being folded into
-        // this one. LAPIC EOI for the MSI vector is handled by the IDT stub.
+        // Acknowledge first, so an event written while draining raises a
+        // fresh interrupt rather than being folded into this one.
         let _ = mmio_write32(self.runtime_base + 0x20, 0b11);
         let mut count = 0;
         // Reports a storage transfer drained come first, in arrival order.
@@ -2291,9 +2290,6 @@ fn arm_input(doorbell_base: u64, device: &mut InputDevice) -> Result<(), InitErr
 
 /// The input interrupt vector (0 until input delivery starts).
 static INPUT_VECTOR: AtomicU8 = AtomicU8::new(0);
-/// The input interrupt lease (0 until input delivery starts).
-static INPUT_INTERRUPT_LEASE: Mutex<Option<crate::driver::PciInterruptLease>> =
-    Mutex::with_rank(None, 25);
 /// Cooperative stop requested for the HID worker before controller teardown.
 static INPUT_STOP: AtomicU8 = AtomicU8::new(0);
 /// The worker task must be dead before its waiter, vector, and DMA rings are
@@ -2344,65 +2340,27 @@ pub fn start_input(driver: &'static str) -> Result<InputSummary, InitError> {
             vector,
         });
     }
-    let (vector, lease) = match crate::driver::enable_pci_interrupt(
-        driver,
-        crate::smp::bsp_apic_id(),
-        0,
-    ) {
-        Ok(crate::driver::PciInterruptLease::Msi(lease)) => (
-            lease.vector.vector,
-            Some(crate::driver::PciInterruptLease::Msi(lease)),
-        ),
-        Ok(crate::driver::PciInterruptLease::Msix(lease)) => (
-            lease.vector.vector,
-            Some(crate::driver::PciInterruptLease::Msix(lease)),
-        ),
+    let vector = match crate::driver::enable_pci_interrupt(driver, crate::smp::bsp_apic_id(), 0) {
+        Ok(crate::driver::PciInterruptLease::Msi(lease)) => lease.vector.vector,
+        Ok(crate::driver::PciInterruptLease::Msix(lease)) => lease.vector.vector,
         Err(_) => return Err(InitError::InterruptUnavailable),
     };
     INPUT_VECTOR.store(vector, Ordering::Release);
-    if let Some(lease) = lease {
-        let mut slot = INPUT_INTERRUPT_LEASE.lock();
-        if slot.is_some() {
-            INPUT_VECTOR.store(0, Ordering::Release);
-            return Err(InitError::InterruptUnavailable);
-        }
-        *slot = Some(lease);
-    }
-    // Best-effort unmask before enabling the controller's interrupter.
-    crate::driver::pci_interrupt_unmask(&INPUT_INTERRUPT_LEASE);
-    let worker = match crate::task::spawn_io_service("usb-input", input_worker) {
-        Ok(worker) => worker,
-        Err(_) => {
-            INPUT_VECTOR.store(0, Ordering::Release);
-            *INPUT_INTERRUPT_LEASE.lock() = None;
-            return Err(InitError::InterruptUnavailable);
-        }
-    };
+    let worker = crate::task::spawn_io_service("usb-input", input_worker)
+        .map_err(|_| InitError::InterruptUnavailable)?;
     INPUT_STOP.store(0, Ordering::Release);
     INPUT_TASK.store(worker.as_u64(), Ordering::Release);
     if !crate::interrupts::set_pci_vector_waiter(vector, worker) {
         INPUT_TASK.store(0, Ordering::Release);
         INPUT_STOP.store(1, Ordering::Release);
         let _ = crate::task::signal_event(worker);
-        INPUT_VECTOR.store(0, Ordering::Release);
-        *INPUT_INTERRUPT_LEASE.lock() = None;
         return Err(InitError::InterruptUnavailable);
     }
-    if CONTROLLER
+    CONTROLLER
         .lock()
         .as_mut()
-        .ok_or(InitError::MissingController)
-        .and_then(|controller| controller.enable_interrupts())
-        .is_err()
-    {
-        let _ = crate::interrupts::clear_pci_vector_waiter(vector, worker);
-        INPUT_TASK.store(0, Ordering::Release);
-        INPUT_STOP.store(1, Ordering::Release);
-        let _ = crate::task::signal_event(worker);
-        INPUT_VECTOR.store(0, Ordering::Release);
-        *INPUT_INTERRUPT_LEASE.lock() = None;
-        return Err(InitError::InterruptUnavailable);
-    }
+        .ok_or(InitError::MissingController)?
+        .enable_interrupts()?;
     // Reports that completed before interrupts were enabled raised none.
     let _ = crate::task::signal_event(worker);
     Ok(InputSummary {
@@ -2527,10 +2485,6 @@ pub fn shutdown() -> Result<(), InitError> {
     ));
     stop_task(&INPUT_TASK, &INPUT_STOP)?;
     crate::serial::write_line(format_args!("[XHCI] shutdown: input worker stopped"));
-    // Quiesce the device interrupt before clearing waiter/lease state. The
-    // actual PCI interrupt lease is owned by the driver binding and is
-    // released by driver teardown; this path only masks delivery.
-    let _ = crate::driver::pci_interrupt_mask(&INPUT_INTERRUPT_LEASE);
     let vector = INPUT_VECTOR.load(Ordering::Acquire);
     if vector != 0 {
         crate::serial::write_line(format_args!(
@@ -2539,9 +2493,8 @@ pub fn shutdown() -> Result<(), InitError> {
         ));
         let task = crate::task::TaskId::from_u64(input_task_id);
         let _ = crate::interrupts::clear_pci_vector_waiter(vector, task);
+        INPUT_VECTOR.store(0, Ordering::Release);
     }
-    INPUT_VECTOR.store(0, Ordering::Release);
-    *INPUT_INTERRUPT_LEASE.lock() = None;
     INPUT_TASK.store(0, Ordering::Release);
     DEFERRED_TASK.store(0, Ordering::Release);
     let controller = CONTROLLER.lock().take();
