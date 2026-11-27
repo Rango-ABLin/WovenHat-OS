@@ -1,3 +1,17 @@
+## OpenCode - sequential multi-client listener (2026-11-27) - DONE
+
+Took the chosen Tier 2 listener item. One listening descriptor now serves
+sequential clients: `network::poll` re-arms it after the accepted peer closes
+(owner `close` is never re-armed), a busy `accept` returns WouldBlock so the
+async worker stays event-driven, and `NET_RECV` distinguishes empty-buffer from
+EOF so a guest can notice the disconnect. The freestanding remote-admin service
+and host mTLS proxy now handle a second connection. Host gate requires two
+clients and two `[LISTEN] accept complete` markers; PASSES 1/2/4/8/16 CPUs with
+one preserved transient 4-CPU timeout and unchanged rerun. Scope:
+`kernel/src/network.rs`, `libwoven/src/net.rs`, `apps/woven-remote-admin`,
+`tools/remote-admin-tls-service`, the host gate and status docs. No new
+syscall, capability or ABI version.
+
 ## OpenCode - app mutations on persistent /mnt (2026-11-27) - DONE
 
 Took the Tier 2 `/mnt` provisioning item. Guest TLS was evaluated first and is

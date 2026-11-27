@@ -108,6 +108,20 @@ def wait_for(path: Path, marker: str, process: subprocess.Popen, timeout: float)
     raise TimeoutError(f"timed out waiting for {marker!r}")
 
 
+def wait_for_count(path: Path, marker: str, count: int, process: subprocess.Popen, timeout: float):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        text = path.read_text(errors="replace") if path.exists() else ""
+        if text.count(marker) >= count:
+            return
+        if process.poll() is not None:
+            raise RuntimeError(
+                f"process exited {process.returncode} before {count}x {marker!r}"
+            )
+        time.sleep(0.05)
+    raise TimeoutError(f"timed out waiting for {count}x {marker!r}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cpus", type=int, choices=(1, 2, 4, 8, 16), default=1)
@@ -197,12 +211,27 @@ def main():
                     assert exchange(stream, request(2, 4, 2)) == (0, 4, 3)
                     assert exchange(stream, request(1, 4, 3, b"replay"))[0] == 1
             wait_for(serial, "[LISTEN] accept complete", qemu, 30)
+            # The first client is gone. The kernel re-arms the same listening
+            # descriptor after its FIN, and the guest service waits on accept
+            # again; a fresh query must observe the journal the first client
+            # left behind. This is a sequential multi-client lifecycle, not a
+            # fabricated simultaneous backlog.
+            # Wait for the kernel to re-arm the listener, not for the guest's
+            # accept to complete: accept only completes once a client arrives.
+            wait_for(serial, "[LISTEN] listener re-armed on port 7001", qemu, 30)
+            with socket.create_connection(("127.0.0.1", tls_port), timeout=socket_timeout) as raw2:
+                with context.wrap_socket(raw2, server_hostname="localhost") as stream2:
+                    assert exchange(stream2, request(3, 6, 3)) == (0, 4, 3)
+            wait_for_count(serial, "[LISTEN] accept complete", 2, qemu, 30)
             (out / "result.json").write_text(json.dumps({
                 "valid": True,
                 "cpus": args.cpus,
                 "transport": "mTLS host boundary -> QEMU TCP -> Ring-3 listen/accept ABI service",
                 "listener_abi": True,
-                "operations": ["query", "apply", "query", "rollback", "replay-rejection"],
+                "multi_client": True,
+                "clients": 2,
+                "operations": ["query", "apply", "query", "rollback", "replay-rejection",
+                               "second-client-query"],
                 "physical_access": "none",
             }, indent=2) + "\n", encoding="utf-8")
         finally:

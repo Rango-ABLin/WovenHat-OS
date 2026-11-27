@@ -143,15 +143,24 @@ fn forward(mut tls: StreamOwned<ServerConnection, TcpStream>, expected_client: [
         .unwrap_or_else(|error| fail(format!("connect guest admin backend {backend}: {error}")));
     loop {
         let mut request = [0u8; MAX_FRAME];
-        tls.read_exact(&mut request[..HEADER])
-            .unwrap_or_else(|error| fail(format!("read forwarded WADM header: {error}")));
+        match tls.read_exact(&mut request[..HEADER]) {
+            Ok(()) => {}
+            // A client that closes cleanly ends this connection; the proxy
+            // returns to accept() and the guest listener is re-armed. Other
+            // read errors remain fatal.
+            Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => return,
+            Err(error) => fail(format!("read forwarded WADM header: {error}")),
+        }
         check_client_identity(&tls, expected_client);
         let length = u16::from_be_bytes([request[24], request[25]]) as usize;
         if length > 256 {
             fail("forwarded WADM payload exceeds bound");
         }
-        tls.read_exact(&mut request[HEADER..HEADER + length])
-            .unwrap_or_else(|error| fail(format!("read forwarded WADM payload: {error}")));
+        match tls.read_exact(&mut request[HEADER..HEADER + length]) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => return,
+            Err(error) => fail(format!("read forwarded WADM payload: {error}")),
+        }
         guest
             .write_all(&request[..HEADER + length])
             .unwrap_or_else(|error| fail(format!("write guest WADM request: {error}")));
@@ -180,13 +189,21 @@ fn main() {
     let listener = TcpListener::bind(&address).unwrap_or_else(|error| fail(format!("bind {address}: {error}")));
     let config = config(&server_cert, &server_key, &client_ca);
     println!("remote-admin TLS listener ready on {address}");
-    let (stream, peer) = listener.accept().unwrap_or_else(|error| fail(format!("accept: {error}")));
-    println!("accepted authenticated-admin connection from {peer}");
-    let connection = ServerConnection::new(config).unwrap_or_else(|error| fail(format!("TLS setup: {error}")));
-    let stream = StreamOwned::new(connection, stream);
-    if let Some(backend) = backend {
-        forward(stream, fingerprint(&client_fingerprint), &backend);
-    } else {
-        serve(stream, fingerprint(&client_fingerprint));
+    // Serve sequential clients on the same listener. The guest listener is
+    // re-armed by the kernel after each connection closes, so one proxy can
+    // exercise a multi-client lifecycle without restarting.
+    loop {
+        let (stream, peer) = listener
+            .accept()
+            .unwrap_or_else(|error| fail(format!("accept: {error}")));
+        println!("accepted authenticated-admin connection from {peer}");
+        let connection = ServerConnection::new(config.clone())
+            .unwrap_or_else(|error| fail(format!("TLS setup: {error}")));
+        let stream = StreamOwned::new(connection, stream);
+        if let Some(ref backend) = backend {
+            forward(stream, fingerprint(&client_fingerprint), backend.as_str());
+        } else {
+            serve(stream, fingerprint(&client_fingerprint));
+        }
     }
 }

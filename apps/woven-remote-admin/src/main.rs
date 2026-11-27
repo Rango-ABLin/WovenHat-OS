@@ -46,7 +46,10 @@ fn send_all(socket: u64, mut bytes: &[u8]) -> bool {
     true
 }
 
-fn recv_exact(socket: u64, bytes: &mut [u8]) -> bool {
+/// Read exactly `bytes`. `Err` means the peer closed (NET_RECV returns 0 after
+/// all queued bytes) or the socket failed; either way this client is done and
+/// the listener can accept the next one.
+fn recv_exact(socket: u64, bytes: &mut [u8]) -> Result<(), ()> {
     let mut offset = 0;
     while offset < bytes.len() {
         let received = invoke(
@@ -55,16 +58,16 @@ fn recv_exact(socket: u64, bytes: &mut [u8]) -> bool {
             bytes[offset..].as_mut_ptr() as u64,
             (bytes.len() - offset) as u64,
         );
-        if received == WOULD_BLOCK || received == 0 {
+        if received == WOULD_BLOCK {
             yield_now();
             continue;
         }
-        if received == ERROR || received as usize > bytes.len() - offset {
-            return false;
+        if received == ERROR || received == 0 || received as usize > bytes.len() - offset {
+            return Err(());
         }
         offset += received as usize;
     }
-    true
+    Ok(())
 }
 
 fn respond(socket: u64, journal: &PolicyJournal, status: u8) -> bool {
@@ -101,12 +104,19 @@ pub extern "C" fn _start() -> ! {
     let mut frame = [0u8; MAX_FRAME];
     let mut payload = [0u8; libwoven::remote_admin::MAX_COMMAND_BYTES];
     loop {
-        if !recv_exact(socket, &mut frame[..HEADER]) {
+        if recv_exact(socket, &mut frame[..HEADER]).is_err() {
+            // This client disconnected. The kernel re-arms the listener when
+            // the FIN is observed, so wait here for the next client on the
+            // same descriptor instead of exiting or closing the socket.
+            match libwoven::network::accept(socket) {
+                Ok(_) => {}
+                Err(_) => yield_now(),
+            }
             continue;
         }
         let length = u16::from_be_bytes([frame[24], frame[25]]) as usize;
         if length > libwoven::remote_admin::MAX_COMMAND_BYTES
-            || !recv_exact(socket, &mut frame[HEADER..HEADER + length])
+            || recv_exact(socket, &mut frame[HEADER..HEADER + length]).is_err()
         {
             let _ = respond(socket, &journal, 1);
             continue;

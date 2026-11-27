@@ -2011,11 +2011,13 @@ struct UserSocket {
     handle: SocketHandle,
     kind: SocketKind,
     peer: Option<IpEndpoint>,
-    /// A TCP socket in listen state. smoltcp auto-accepts one connection on
-    /// the listening socket itself, so this is a single-connection listener:
-    /// after an accept the socket is connected and a new socket must be
-    /// created and listened for another client.
+    /// The socket stays a listener across accepts. smoltcp auto-accepts one
+    /// connection on the listening socket itself; when that peer closes, the
+    /// network poll re-arms the same socket so the next client can connect.
+    /// No simultaneous backlog is fabricated.
     listening: bool,
+    /// Port passed to `listen`, retained so the poll loop can re-arm.
+    listen_port: Option<u16>,
     generation: u32,
     async_refs: u16,
     closing: bool,
@@ -2315,6 +2317,7 @@ pub fn poll() {
         let _ = iface.poll(now(), device, sockets);
     }
     for index in 0..MAX_USER_SOCKETS {
+        rearm_closed_listener(&mut runtime, index);
         retire_closed_socket(&mut runtime, index);
     }
     drop(runtime);
@@ -2535,6 +2538,7 @@ pub fn socket_open(owner: u64, kind: SocketKind) -> Result<u64, SocketError> {
         kind,
         peer: None,
         listening: false,
+        listen_port: None,
         generation,
         async_refs: 0,
         closing: false,
@@ -2590,13 +2594,15 @@ pub fn socket_listen(owner: u64, id: u64, port: u16) -> Result<(), SocketError> 
         .as_mut()
         .ok_or(SocketError::Invalid)?;
     socket.listening = true;
+    socket.listen_port = Some(port);
     socket.peer = None;
     Ok(())
 }
 
 /// Complete one pending connection on a pinned listening socket. Returns the
 /// packed accepted endpoint, or `WouldBlock` while the handshake is in progress
-/// so the async worker can retry on the next network progress event.
+/// so the async worker can retry on the next network progress event. The socket
+/// remains a listener; it is re-armed for the next client after this one closes.
 pub fn socket_accept_pinned(token: SocketToken) -> Result<usize, SocketError> {
     let Some(runtime) = RUNTIME.get() else {
         return Err(SocketError::Offline);
@@ -2605,6 +2611,12 @@ pub fn socket_accept_pinned(token: SocketToken) -> Result<usize, SocketError> {
     let entry = find_token(&runtime, token)?;
     if entry.kind != SocketKind::Tcp || !entry.listening || entry.closing {
         return Err(SocketError::WrongKind);
+    }
+    // A connection is still being served on this listener. Let the async worker
+    // retry on the next network event instead of completing the wait with an
+    // error, which would spin in a guest that loops on accept().
+    if entry.peer.is_some() {
+        return Err(SocketError::WouldBlock);
     }
     let endpoint = runtime
         .sockets
@@ -2617,9 +2629,44 @@ pub fn socket_accept_pinned(token: SocketToken) -> Result<usize, SocketError> {
     let socket = runtime.user[token.slot as usize]
         .as_mut()
         .ok_or(SocketError::Invalid)?;
-    socket.listening = false;
     socket.peer = Some(endpoint);
     Ok(packed)
+}
+
+/// Re-arm a listener whose accepted peer has closed. Caller holds the runtime
+/// lock. Only a peer-initiated close re-arms: an explicit `close` by the owner
+/// sets `closing` and keeps the socket on the ordinary teardown path. Aborting
+/// the finished connection before listening again avoids smoltcp's
+/// `InvalidState` for `listen` on an already-open socket.
+fn rearm_closed_listener(runtime: &mut Runtime, index: usize) {
+    let Some(mut entry) = runtime.user[index] else {
+        return;
+    };
+    if entry.kind != SocketKind::Tcp
+        || !entry.listening
+        || entry.peer.is_none()
+        || entry.closing
+        || entry.async_refs != 0
+    {
+        return;
+    }
+    let Some(port) = entry.listen_port else {
+        return;
+    };
+    let state = runtime.sockets.get::<tcp::Socket>(entry.handle).state();
+    match state {
+        tcp::State::Closed | tcp::State::CloseWait => {}
+        _ => return,
+    }
+    let socket = runtime.sockets.get_mut::<tcp::Socket>(entry.handle);
+    socket.abort();
+    if socket.listen(port).is_err() {
+        return;
+    }
+    #[cfg(feature = "remote-admin-test")]
+    crate::serial::write_line(format_args!("[LISTEN] listener re-armed on port {}", port));
+    entry.peer = None;
+    runtime.user[index] = Some(entry);
 }
 
 #[cfg(any(feature = "stage14-3-test", feature = "stage14-4-test"))]
@@ -2729,12 +2776,23 @@ pub fn socket_recv(
             .recv_slice(out)
             .map(|(len, meta)| (len, Some(meta.endpoint)))
             .map_err(|_| SocketError::WouldBlock),
-        SocketKind::Tcp => runtime
-            .sockets
-            .get_mut::<tcp::Socket>(entry.handle)
-            .recv_slice(out)
-            .map(|len| (len, entry.peer))
-            .map_err(|_| SocketError::WouldBlock),
+        SocketKind::Tcp => {
+            let socket = runtime.sockets.get_mut::<tcp::Socket>(entry.handle);
+            // `recv_slice` also returns Ok(0) for an empty buffer, so map that
+            // to WouldBlock while the connection is open; a zero-length read
+            // means EOF only once the receive half has closed. This matches
+            // `socket_recv_pinned` and lets clients detect a finished peer.
+            if !socket.may_recv() {
+                return Ok((0, entry.peer));
+            }
+            if !socket.can_recv() {
+                return Err(SocketError::WouldBlock);
+            }
+            socket
+                .recv_slice(out)
+                .map(|len| (len, entry.peer))
+                .map_err(|_| SocketError::WouldBlock)
+        }
     }
 }
 
