@@ -391,7 +391,10 @@ fn run_ax201_management_tx_probe(
 }
 
 #[cfg(feature = "physical-wifi")]
-pub fn run_ax201_activation(console: &mut Console, acpi: Option<&hal::acpi::Summary>) -> ! {
+// This probe halts the machine, but its Rust signature intentionally returns
+// `()`. A `!` return makes the remaining boot path unreachable to the compiler
+// and turns every stage-gated item into a dead-code/unused warning.
+pub fn run_ax201_activation(console: &mut Console, acpi: Option<&hal::acpi::Summary>) {
     serial::init();
     console.clear();
     line(console, format_args!("WOVENHAT AX201 ACTIVATION PROBE"));
@@ -1039,7 +1042,7 @@ pub fn run_ax201_activation(console: &mut Console, acpi: Option<&hal::acpi::Summ
     let _ = irq_controller.disable();
     let _ = hal::pci::disable_msi(device);
     let _ = hal::pci::restore_command(function.pci.address, original_command);
-    physical_halt()
+    physical_halt();
 }
 
 #[cfg(feature = "physical-wifi")]
@@ -1051,7 +1054,9 @@ fn physical_halt() -> ! {
 }
 
 #[cfg(not(feature = "physical-wifi"))]
-pub fn run(console: &mut Console, acpi: Option<&hal::acpi::Summary>) -> ! {
+// See `run_ax201_activation`: the unit return keeps the rest of the boot image
+// type-reachable for warning-denying stage-feature lints.
+pub fn run(console: &mut Console, acpi: Option<&hal::acpi::Summary>) {
     serial::init();
     console.clear();
     line(
@@ -1237,5 +1242,5 @@ pub fn run(console: &mut Console, acpi: Option<&hal::acpi::Summary>) -> ! {
         format_args!("RECORD THIS SCREEN. POWER OFF TO LEAVE."),
     );
     serial::write_line(format_args!("[PHYSICAL] SCREEN READY"));
-    crate::halt()
+    crate::halt();
 }

@@ -734,9 +734,12 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
             # QMP reports PS/2 motion in the guest's logical compositor
             # coordinates.  The 1280x800 framebuffer is presented at 2x, so
             # do not use screenshot-pixel deltas here.  The shell starts at
-            # the logical 640x400 centre; move to (260,246), which is inside
-            # WovenFiles' refresh button at client origin (40,40).
-            qmp.relative_mouse(-60, 46)
+            # the logical 640x400 centre; move to (424,316), the centre of
+            # WovenFiles' Refresh button (`BUTTON_X=344`, `BUTTON_Y=266`,
+            # 80x20) at client origin (40,40).  The previous target at
+            # (260,246) was a stale smaller layout and never activated the
+            # current 440x300 WovenFiles app.
+            qmp.relative_mouse(104, 116)
             time.sleep(0.3)
             time.sleep(0.5)
             qmp.click()
@@ -790,18 +793,25 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
             _, _, after_keyboard = capture_until_changed(
                 qmp, keyboard_frame, after_pointer,
                 time.monotonic() + args.frame_timeout, timings, "keyboard_refresh", 20,
-                region_changed(after_pointer, 520, 490, 160, 45, 20)
+                # WovenFiles opens at (40,40); its Refresh button is local
+                # (344,266,80,20), and the 1280x800 scanout is 2x logical.
+                # Require a change in that actual client region, not an
+                # unrelated part of the desktop.  `WovenFiles` currently
+                # leaves `refresh_count` unrendered; the assertion targets
+                # the strict button/focus repaint rather than inventing a
+                # count oracle.  Keep total-changed-pixel requirement below.
+                region_changed(after_pointer, 768, 612, 160, 40, 20)
             )
             screenshots.append(keyboard_frame.name)
             if changed_pixels(after_pointer, after_keyboard) < 20:
                 raise GateFailure("keyboard refresh did not change the client framebuffer")
 
             close_files_started = time.monotonic()
-            # The Files window opens at (40,40), with a 320px client and a
+            # The Files window opens at (40,40), with a 440px client and a
             # ten-pixel close box at the right of its 14px title bar.  The
-            # pointer is at the refresh control (260,246) after the click.
-            # Files close box: global (40 + 320 - 12, 40 - 14 + 2).
-            qmp.relative_mouse(88, -218)
+            # pointer is at the refresh control (424,316) after the click.
+            # Files close box: global (40 + 440 - 12, 40 - 14 + 2).
+            qmp.relative_mouse(44, -288)
             qmp.click()
             wait_marker(serial, "woven-shell: window closed: Files", close_files_started + args.input_timeout,
                         process, "files_window_close_ms", timings, close_files_started)
@@ -840,13 +850,16 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
                 raise GateFailure("Settings keyboard refresh did not change the client framebuffer")
             # The shell cascades each newly opened window by (24,24), even
             # after the earlier window closes. Settings opens at (64,64).
-            qmp.relative_mouse(69, 29)
+            # WovenSettings is 360px wide; its close box is global
+            # (64 + 360 - 12, 64 - 14 + 2) = (412,52).  After closing
+            # WovenFiles the pointer is at (468,28); restore that point.
+            qmp.relative_mouse(-56, 24)
             qmp.click()
             settings_close_started = time.monotonic()
             wait_marker(serial, "woven-shell: window closed: Settings",
                         settings_close_started + args.input_timeout, process,
                         "settings_window_close_ms", timings, settings_close_started)
-            qmp.relative_mouse(-69, -29)
+            qmp.relative_mouse(56, -24)
 
             terminal_started = time.monotonic()
             for key in ("f1", "t", "e", "r", "m", "i", "n", "a", "l", "ret"):
@@ -869,9 +882,9 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
             keyboard_started = time.monotonic()
             # Put focus unambiguously in the terminal client before sending
             # the keyboard event; the shell routes keys to its focused window.
-            # From the Files close position (348,28), move into the terminal
-            # body at (100,100).
-            qmp.relative_mouse(-248, 72)
+            # After the Settings close and pointer restore, the pointer is at
+            # (468,28); move into the terminal body at (100,100).
+            qmp.relative_mouse(-368, 72)
             qmp.click()
             time.sleep(0.3)
             qmp.key("h", 100)
