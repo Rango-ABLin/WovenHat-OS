@@ -36,7 +36,12 @@ CPU reruns are BLOCKED by another owner's in-progress kernel WIP
 not a regression from this change. Once that WIP compiled, the same gate
 PASSED at 2/4 CPUs too (`shadow-clip-pins-{2,4}cpu-3G-r2`, zero failures,
 maximize markers present), so the blend path is proven non-blocking at 1/2/4.
-WSIZ reflow remains a separate deferred change.
+WSIZ client reflow was then made fail-closed in the harness: the gate requires
+the Terminal `WRSZ` echo and the shell's clamped/normal resize markers on
+maximize and restore, and the shell logs a failed `WSIZ` send. That gate and
+baseline-enforced desktop qualification both PASS at 1/2/4 CPUs
+(`wsiz-reflow-*`, `wsiz-desktop-*`). Mark this item DONE; no kernel ABI,
+capability or assertion changed.
 
 ## Copilot - native compositor/USB 16-CPU closure (2026-11-27) - DONE
 
