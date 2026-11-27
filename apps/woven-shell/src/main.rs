@@ -4083,12 +4083,31 @@ impl Desktop {
             if alpha == 0 {
                 continue;
             }
-            // Window shadows are temporarily disabled: painter.blend's
-            // present_region_blended path can stall on the software compositor
-            // during heavy QEMU repaints, which hung the shell after maximize.
-            // TODO(phase-b): restore shadows once the compositor blend path is
-            // proven non-blocking in this environment.
-            let _ = (bands, frame, area, above_taskbar, SHADOW);
+            // Shadow bands are offset down/right of the frame, so only the
+            // ring outside the frame is visible: the title, client surface
+            // and border below overwrite the interior. Blending the whole
+            // frame three times per window made a band-filling window issue
+            // millions of per-pixel blends on the software compositor. Clip
+            // to the visible ring first; the remaining present_region_blended
+            // work is bounded by the shadow reach times the window perimeter.
+            for (offset, opacity) in bands {
+                let band = Area::new(
+                    frame.x + offset,
+                    frame.y + offset,
+                    frame.width,
+                    frame.height,
+                );
+                let opacity = (u32::from(opacity) * u32::from(alpha) / 255) as u8;
+                if opacity == 0 {
+                    continue;
+                }
+                for piece in band.subtract(frame) {
+                    let part = piece.intersect(area).intersect(above_taskbar);
+                    if !part.is_empty() {
+                        painter.blend(part, SHADOW, opacity);
+                    }
+                }
+            }
             let active = Some(slot) == focused;
             let title = window.title_area().intersect(area);
             if !title.is_empty() {
