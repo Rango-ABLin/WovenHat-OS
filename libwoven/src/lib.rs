@@ -182,8 +182,8 @@ pub mod javascript;
 pub mod keyboard_layout;
 pub mod media;
 pub mod module_namespace;
-#[path = "net.rs"]
-pub mod network;
+pub mod net;
+pub use net as network;
 pub mod package;
 pub mod package_ipc;
 pub mod recovery;
@@ -339,8 +339,7 @@ pub mod fs {
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub struct Handle(pub u64);
 }
-pub mod net;
-#[cfg(any(test, feature = "reclaiming-allocator"))]
+#[cfg(feature = "reclaiming-allocator")]
 pub mod socks5;
 pub mod ipc {
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]

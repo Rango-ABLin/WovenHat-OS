@@ -333,6 +333,9 @@ static BOOTLOADER_CONFIG: BootloaderConfig = {
 
 entry_point!(kernel_main, config = &BOOTLOADER_CONFIG);
 
+#[cfg(not(target_os = "none"))]
+fn main() {}
+
 static PREEMPTION_PROBE_BLOCKED: AtomicBool = AtomicBool::new(false);
 static PREEMPTION_PROBE_COMPLETED: AtomicBool = AtomicBool::new(false);
 static FAIR_TASK_A_RUNS: AtomicU64 = AtomicU64::new(0);
@@ -2504,6 +2507,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     console.println("PIC: INITIALIZED (ALL IRQS MASKED)");
 
     timer::init();
+    start_boot_profile();
     serial::write_line(format_args!(
         "[RNG] boot entropy: {}",
         if secure_rng::seed_from_hardware() {
@@ -19009,6 +19013,7 @@ static BOOT_STAGE_CLOCK: AtomicU64 = AtomicU64::new(0);
 static BOOT_PROFILE_START: AtomicU64 = AtomicU64::new(0);
 static BOOT_PROFILE_READY: AtomicBool = AtomicBool::new(false);
 
+#[allow(dead_code)]
 fn start_boot_profile() {
     let now = timer::ticks();
     BOOT_PROFILE_START.store(now, Ordering::Release);

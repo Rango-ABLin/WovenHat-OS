@@ -159,6 +159,39 @@ impl BlockDevice for AtaPio {
     }
 }
 
+/// Private adapter for the already serialized primary ATA channel. Only the
+/// port accesses require unsafe; all command sequencing is in safe Rust.
+struct FlushPorts;
+
+impl flush::Transport for FlushPorts {
+    fn status(&mut self) -> u8 {
+        // SAFETY: constructed only by the channel owner in AtaPio::flush.
+        unsafe { inb(STATUS_COMMAND) }
+    }
+    fn select_master(&mut self) {
+        // SAFETY: the caller exclusively owns the primary channel; low device
+        // bits are zero for the non-data command (not an LBA sector address).
+        unsafe { outb(DRIVE, 0xa0) }
+    }
+    fn issue(&mut self, command: u8) {
+        // SAFETY: the sequencer verified channel idle and owns its registers.
+        unsafe { outb(STATUS_COMMAND, command) }
+        #[cfg(feature = "stage1-5-ata-flush-test")]
+        FLUSH_ISSUED.fetch_add(1, Ordering::SeqCst);
+    }
+    fn settle(&mut self) {
+        // SAFETY: same channel ownership; alternate-status reads settle
+        // device selection/command writes without consuming a data word.
+        unsafe { io_delay() }
+    }
+    fn ticks(&mut self) -> u64 {
+        crate::timer::ticks()
+    }
+    fn relax(&mut self) {
+        core::hint::spin_loop();
+    }
+}
+
 /// # Safety
 /// Programs the fixed primary ATA channel registers; call with the channel
 /// (`PRIMARY_MASTER`) held or during single-threaded init.

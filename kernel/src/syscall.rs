@@ -551,7 +551,7 @@ pub enum Number {
     /// Synthesize (inject) an input event as if it arrived from hardware.
     /// Requires the `InputInject` capability; confined to SystemService.
     /// arg0 = kind, arg1 = primary value, arg2 = secondary value -> 0 or ERROR.
-    InputInject = 248,
+    InputInject = 252,
 }
 
 pub fn entry_address() -> u64 {

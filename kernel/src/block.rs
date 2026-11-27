@@ -62,6 +62,7 @@ impl<const SECTORS: usize> RamDisk<SECTORS> {
 
     /// Allocate a large disposable RAM disk without constructing its backing
     /// array on the caller's small kernel stack.
+    #[allow(dead_code)]
     pub fn boxed_zeroed() -> Option<Box<Self>> {
         let layout = alloc::alloc::Layout::new::<Self>();
         // SAFETY: `alloc_zeroed` returns a pointer aligned and sized for the

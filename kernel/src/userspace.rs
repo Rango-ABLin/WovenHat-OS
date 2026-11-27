@@ -4629,6 +4629,8 @@ impl UserStack {
 pub const MAX_ARGV: usize = 16;
 /// Maximum total bytes for all argv string data (including NULs).
 pub const MAX_ARGV_BYTES: usize = 1024;
+/// Maximum number of environment strings placed on an initial user stack.
+pub const MAX_ENV: usize = 8;
 
 /// Minimal crt0 contract expected by the kernel stack layout:
 ///
@@ -5616,12 +5618,15 @@ pub fn map_dynamic_anonymous(
     if !paging::user_range_is_unmapped_in(address_space, address, size) {
         return None;
     }
+    // Issue the lifetime lineage before any page/backing side effects.
+    let lifetime = MAPPING_LIFETIMES.issue()?;
     paging::map_user_range_in(address_space, address, size, true, false).ok()?;
     if paging::zero_user_range_in(address_space, address, size).is_err() {
         let _ = paging::unmap_user_range_in(address_space, address, size);
         return None;
     }
     Some(AnonymousMapping {
+        lifetime,
         address,
         size,
         writable: true,
@@ -5644,6 +5649,7 @@ pub fn dynamic_mapping_descriptor(address: u64, size: usize) -> Option<Anonymous
         return None;
     }
     Some(AnonymousMapping {
+        lifetime: MAPPING_LIFETIMES.issue()?,
         address,
         size,
         writable: true,

@@ -1078,6 +1078,8 @@ struct Scheduler {
     dynamic_module_task: Option<TaskId>,
     dynamic_module_depth: u16,
     abandoned_dynamic_module_owners: [Option<u64>; MAX_PROCESSES],
+    // Covers every outgoing state, including Dead/Blocked before assembly.
+    vm_handoffs: crate::vm_handoff::Handoffs<{ crate::smp::MAX_CPUS }>,
 }
 
 impl Scheduler {
@@ -1093,6 +1095,7 @@ impl Scheduler {
             dynamic_module_task: None,
             dynamic_module_depth: 0,
             abandoned_dynamic_module_owners: [None; MAX_PROCESSES],
+            vm_handoffs: crate::vm_handoff::Handoffs::empty(),
         }
     }
 
@@ -4759,18 +4762,25 @@ pub fn exit_current_process(exit_code: i32) -> ! {
 
 fn process_has_live_tasks(process_id: u64) -> bool {
     let scheduler = SCHEDULER.lock();
-    scheduler.vm_handoffs.retains(process_id) || scheduler.tasks.iter().any(|task| {
-        task.process_id.as_u64() == process_id
-            && matches!(
-                task.state,
-                TaskState::Ready
-                    | TaskState::Running
-                    | TaskState::Switching
-                    | TaskState::Blocked
-                    | TaskState::Sleeping
-                    | TaskState::Stopped
-            )
-    })
+    scheduler.process_has_live_tasks(process_id)
+}
+
+impl Scheduler {
+    fn process_has_live_tasks(&self, process_id: u64) -> bool {
+        self.vm_handoffs.retains(process_id)
+            || self.tasks.iter().any(|task| {
+                task.process_id.as_u64() == process_id
+                    && matches!(
+                        task.state,
+                        TaskState::Ready
+                            | TaskState::Running
+                            | TaskState::Switching
+                            | TaskState::Blocked
+                            | TaskState::Sleeping
+                            | TaskState::Stopped
+                    )
+            })
+    }
 }
 
 /// Apply the POSIX orphaned-group transition to stopped descendants of an

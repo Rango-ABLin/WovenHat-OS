@@ -3713,13 +3713,6 @@ pub fn self_test() -> bool {
         9, 2, 25, 0, 1, 1, 0, 0x80, 50, 9, 4, 0, 0, 1, 3, 1, 1, 0, 7, 5, 0x81, 3, 8, 0, 10,
     ];
     let hid = parse_hid_interface(&descriptor, 1);
-    // The boot-keyboard state machine is intentionally absent in early
-    // QEMU-only feature gates; exercise it only where it is compiled in.
-    #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
-    let keyboard_press_ok =
-        keyboard_presses([0, 0, 0x29, 0, 0, 0, 0, 0], &mut [0; 6])[0] == Some(Key::Escape);
-    #[cfg(all(feature = "qemu-test", not(feature = "stage13-12-test")))]
-    let keyboard_press_ok = true;
     let (mouse_events, mouse_buttons) = decode_boot_mouse([0x01, 5, 0xfd, 0, 0, 0, 0, 0], 0);
     let mouse_path = mouse_events[0] == Some(Event::PointerMove { dx: 5, dy: -3 })
         && mouse_events[1]
@@ -3815,6 +3808,16 @@ fn bios_handoff(mmio: u64, hcc1: u32) -> Result<(), InitError> {
         offset += next * 4;
     }
     Ok(())
+}
+
+fn find_connected_port(op_base: u64, max_ports: u8) -> Result<u8, InitError> {
+    for port in 1..=max_ports {
+        let portsc = mmio_read32(op_base + 0x400 + (u64::from(port - 1) * 0x10))?;
+        if portsc & 1 != 0 {
+            return Ok(port);
+        }
+    }
+    Err(InitError::NoConnectedPort)
 }
 
 fn wait_until(address: u64, mask: u32, expected: u32) -> Result<(), InitError> {

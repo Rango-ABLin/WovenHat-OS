@@ -177,7 +177,6 @@ impl Console {
         self.set_cursor_position(x, y);
         self.print(title);
         let theme = "Weave Will into Honor";
-        let theme_width = theme.chars().count() * 6 * self.scale;
         self.set_cursor_position(
             (info.width / 2).saturating_sub(12 * self.scale),
             y + 18 * self.scale,

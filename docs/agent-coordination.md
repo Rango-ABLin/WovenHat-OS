@@ -1,3 +1,19 @@
+## OpenCode - latest-image build repair (2026-11-27) - ACTIVE
+
+Restoring a coherent `cargo check`/image build on current master. Fixing a
+bounded set of restoration defects without touching WovenFS-owned files:
+- `kernel/src/ata.rs`: re-add `FlushPorts` `flush::Transport` adapter.
+- `kernel/src/hal/acpi.rs`: re-add `Power::pm_timer`/`pm_timer_32` fields.
+- `kernel/src/syscall.rs`: resolve `SystemStatus`/`InputInject` discriminant
+  collision; `SystemStatus = 248` (documented ABI), `InputInject = 252`.
+- `kernel/src/task.rs`: re-add `Scheduler::vm_handoffs` + `process_has_live_tasks`.
+- `kernel/src/userspace.rs` + `kernel/src/userspace/linker.rs`: re-add `MAX_ENV`,
+  `load_with_env`, env-carrying loader chain, `AnonymousMapping.lifetime`.
+- `kernel/src/xhci.rs`: re-add `find_connected_port`, drop redundant unused
+  `keyboard_press_ok`.
+Please coordinate before touching those symbols. No WovenFS (`wfs.rs`,
+`storage.rs`, `fat32.rs`, `snapshots.rs`) edits.
+
 ## Copilot - latest-image desktop progress test (2026-11-27) - DONE (GATE FAIL)
 
 Running the current-head desktop qualification without modifying source or

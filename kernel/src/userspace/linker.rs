@@ -1192,28 +1192,7 @@ fn collect_lifecycle(images: &[LinkImage<'_>]) -> Option<(Vec<u64>, Vec<u64>)> {
     Some((init, fini))
 }
 
-fn lifecycle_trampoline_address(space: &AddressSpace, mmap_base: u64) -> Option<u64> {
-    let mut address = LIFECYCLE_TRAMPOLINE;
-    loop {
-        let end = address.checked_add(ASLR_PAGE)?;
-        if end > mmap_base {
-            return None;
-        }
-        let mut occupied = false;
-        for mapping in &space.mappings[..space.mapping_count] {
-            let mapping_end = mapping.start().checked_add(mapping.size() as u64)?;
-            if address < mapping_end && mapping.start() < end {
-                occupied = true;
-                break;
-            }
-        }
-        if !occupied {
-            return Some(address);
-        }
-        address = end;
-    }
-}
-
+#[allow(dead_code)]
 fn build_scope<'a>(images: &'a [LinkImage<'a>]) -> Option<SymbolScope<'a>> {
     let main = images.first()?;
     let mut scope = SymbolScope::new(&main.image, &main.bytes);
@@ -1230,9 +1209,27 @@ pub(super) fn load(bytes: &[u8], args: &[&str]) -> Option<UserProgram> {
     load_with_candidate_bias(bytes, args, aslr_image_delta())
 }
 
+/// Load an image with a caller-provided, bounded initial environment.
+///
+/// Existing loaders deliberately continue through [`load_with_candidate_bias`]
+/// so their process contract remains an empty environment until they opt in
+/// explicitly.
+pub(super) fn load_with_env(bytes: &[u8], args: &[&str], env: &[&str]) -> Option<UserProgram> {
+    load_with_candidate_bias_env(bytes, args, env, aslr_image_delta())
+}
+
 pub(super) fn load_with_candidate_bias(
     bytes: &[u8],
     args: &[&str],
+    candidate_bias: u64,
+) -> Option<UserProgram> {
+    load_with_candidate_bias_env(bytes, args, &[], candidate_bias)
+}
+
+fn load_with_candidate_bias_env(
+    bytes: &[u8],
+    args: &[&str],
+    env: &[&str],
     candidate_bias: u64,
 ) -> Option<UserProgram> {
     // Production binaries may extend beyond the original low mmap floor.
@@ -1255,7 +1252,7 @@ pub(super) fn load_with_candidate_bias(
     let trampoline_base = image_end.checked_add(4095)? & !4095;
     let minimum_mmap_base = trampoline_base.checked_add(4096)?;
     let mmap_base = aslr_mmap_base()?.max(minimum_mmap_base);
-    load_with_geometry(bytes, args, candidate_bias, aslr_stack_base()?, mmap_base)
+    load_with_geometry(bytes, args, env, candidate_bias, aslr_stack_base()?, mmap_base)
 }
 
 // One graph-loader path for production draws and forced-draw CPU regressions.
@@ -1263,6 +1260,7 @@ pub(super) fn load_with_candidate_bias(
 pub(super) fn load_with_geometry(
     bytes: &[u8],
     args: &[&str],
+    env: &[&str],
     candidate_bias: u64,
     stack_base: u64,
     mmap_base: u64,

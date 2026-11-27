@@ -45,7 +45,7 @@ fn run_with_displacement(displacement: u64) -> bool {
     let processes = crate::task::process_count();
     let endpoints = crate::ipc::endpoint_count();
     let Some(mut program) =
-        linker::load_with_geometry(&bytes, &["aslr-guard"], 0, stack_base, mmap_base)
+        linker::load_with_geometry(&bytes, &["aslr-guard"], &[], 0, stack_base, mmap_base)
     else {
         return false;
     };

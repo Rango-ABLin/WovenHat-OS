@@ -43,6 +43,10 @@ pub struct Power {
     pub s5: Option<(u8, u8)>,
     /// `\_S3` sleep types for suspend-to-RAM, when firmware advertises it.
     pub s3: Option<(u8, u8)>,
+    /// ACPI PM timer I/O port (0 when absent).
+    pub pm_timer: u16,
+    /// The PM timer counts in 32 bits rather than 24 (FADT flags bit 8).
+    pub pm_timer_32: bool,
     /// Validated FACS location and existing firmware waking vectors.
     pub facs: Option<Facs>,
 }
