@@ -150,6 +150,95 @@ fn mount_consistent(image: &CrashDisk, context: &str) -> Volume<CrashDisk> {
     volume
 }
 
+fn forge_committed_journal(disk: &CrashDisk, targets: &[u64], valid_checksum: bool) {
+    let sb = *Volume::mount(disk.clone())
+        .expect("baseline mount")
+        .super_block();
+    let mut image = disk.image.borrow_mut();
+    let mut descriptor = [0u8; SECTOR_SIZE];
+    descriptor[..8].copy_from_slice(wfs::JOURNAL_DESC_MAGIC);
+    descriptor[8..16].copy_from_slice(&999_u64.to_le_bytes());
+    descriptor[16..20].copy_from_slice(&(targets.len() as u32).to_le_bytes());
+    let mut checksum = 0xcbf2_9ce4_8422_2325_u64;
+    for (index, target) in targets.iter().enumerate() {
+        descriptor[24 + index * 8..32 + index * 8].copy_from_slice(&target.to_le_bytes());
+        let payload = [(index + 1) as u8; SECTOR_SIZE];
+        checksum = payload.iter().fold(checksum, |hash, byte| {
+            (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+        });
+        image[(sb.journal_start + 1 + index as u64) as usize] = payload;
+    }
+    image[sb.journal_start as usize] = descriptor;
+    let mut commit = [0u8; SECTOR_SIZE];
+    commit[..8].copy_from_slice(wfs::JOURNAL_COMMIT_MAGIC);
+    commit[8..16].copy_from_slice(&999_u64.to_le_bytes());
+    commit[16..24].copy_from_slice(&(checksum ^ u64::from(!valid_checksum)).to_le_bytes());
+    image[(sb.journal_start + 1 + targets.len() as u64) as usize] = commit;
+}
+
+#[test]
+fn committed_journal_rejects_invalid_destinations_without_writes() {
+    let baseline = formatted();
+    let sb = *Volume::mount(baseline.clone())
+        .expect("baseline mount")
+        .super_block();
+    for target in [
+        0,
+        1,
+        sb.journal_start,
+        sb.journal_start + u64::from(sb.journal_blocks) - 1,
+        sb.total_blocks,
+        sb.data_start,
+    ] {
+        let disk = baseline.fork(None);
+        forge_committed_journal(&disk, &[sb.data_start, target], true);
+        let before = disk.sectors();
+        let candidate = disk.fork(None);
+        assert!(
+            matches!(Volume::mount(candidate.clone()), Err(Error::Corrupt)),
+            "target {target} must fail closed"
+        );
+        assert_eq!(candidate.writes(), 0, "target {target} caused a write");
+        assert_eq!(candidate.sectors(), before, "target {target} changed disk");
+    }
+}
+
+#[test]
+fn torn_journal_with_invalid_destination_is_discarded_without_writes() {
+    let disk = formatted();
+    forge_committed_journal(&disk, &[0], false);
+    let before = disk.sectors();
+    let candidate = disk.fork(None);
+    Volume::mount(candidate.clone()).expect("torn journal is discarded");
+    assert_eq!(candidate.writes(), 0);
+    assert_eq!(candidate.sectors(), before);
+}
+
+#[test]
+fn transaction_preflight_rejects_reserved_bitmap_target_without_writes() {
+    let disk = formatted();
+    let sb = *Volume::mount(disk.clone())
+        .expect("baseline mount")
+        .super_block();
+    {
+        let mut image = disk.image.borrow_mut();
+        let superblock = &mut image[0];
+        superblock[40..48].copy_from_slice(&sb.journal_start.to_le_bytes());
+        let checksum = superblock[..80]
+            .iter()
+            .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+                (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+            });
+        superblock[80..88].copy_from_slice(&checksum.to_le_bytes());
+    }
+    let candidate = disk.fork(None);
+    let mut volume = Volume::mount(candidate.clone()).expect("mount forged geometry");
+    let before = candidate.sectors();
+    assert_eq!(volume.mkdir(1, "invalid", 0o755, 1), Err(Error::Corrupt));
+    assert_eq!(candidate.writes(), 0);
+    assert_eq!(candidate.sectors(), before);
+}
+
 #[test]
 fn format_produces_a_consistent_mountable_volume() {
     let image = formatted();

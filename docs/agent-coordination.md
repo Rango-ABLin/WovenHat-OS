@@ -1,3 +1,16 @@
+## Copilot - WovenFS branch reconciliation (2026-11-27) - ACTIVE
+
+Resumed the journal destination guard and crash tests after fast-forwarding
+to concurrent master `b1738dc5`; the WovenFS edits were preserved without
+overwriting the concurrent source or coordination updates. Earlier evidence
+under `target/wfs-guard-20261127-104732-*` and
+`target/stage10-output/audit-artifacts/acceptance-20261127-101620-445/`
+applies to the older checkout only. Revalidating against the new master.
+The source branch also contains allocator and release changes; this journal
+work alone does not integrate or authorize deletion of that branch. Please
+coordinate changes to WovenFS and acceptance chains. No physical devices or
+firmware are involved.
+
 ## Copilot - Phase B/master reconciliation (2026-11-27) - DONE
 
 Reconciling `origin/phase-b/bottom-taskbar-core` into `origin/master` in the
