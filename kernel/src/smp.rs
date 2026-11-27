@@ -933,6 +933,22 @@ pub fn reschedule_ipi_count() -> u64 {
 // every later call goes straight to the fast port-0x80 fallback.
 static PIT_UNAVAILABLE: AtomicBool = AtomicBool::new(false);
 fn delay_10ms() {
+    // The ACPI PM timer cannot be clock-gated; the 8254 can, and on some
+    // real machines it is, which made every LAPIC tick rate wrong.
+    if let Some((start, mask)) = crate::timer::pm_read() {
+        let target = (crate::timer::PM_TIMER_HZ / 100) as u32;
+        let tsc = unsafe { core::arch::x86_64::_rdtsc() };
+        while let Some((now, _)) = crate::timer::pm_read() {
+            if now.wrapping_sub(start) & mask >= target {
+                return;
+            }
+            assert!(
+                unsafe { core::arch::x86_64::_rdtsc() }.wrapping_sub(tsc) < 5_000_000_000,
+                "PM timer calibration timeout"
+            );
+            core::hint::spin_loop();
+        }
+    }
     use x86_64::instructions::port::Port;
     unsafe {
         if !PIT_UNAVAILABLE.load(Ordering::Relaxed) {
@@ -1049,6 +1065,8 @@ pub fn start(topology: Option<crate::hal::acpi::Summary>, offset: u64) {
         IDS[0].load(Ordering::Relaxed) <= u8::MAX as u32,
         "IOAPIC BSP APIC ID"
     );
+    let power = crate::hal::acpi::power().unwrap_or_default();
+    crate::timer::set_pm_timer(power.pm_timer, power.pm_timer_32);
     write(0x3e0, 3);
     write(0x380, u32::MAX);
     delay_10ms();
@@ -1057,6 +1075,11 @@ pub fn start(topology: Option<crate::hal::acpi::Summary>, offset: u64) {
         TIMER_COUNT.load(Ordering::Relaxed) > 0,
         "LAPIC timer calibration"
     );
+    serial::write_line(format_args!(
+        "[TIMER] LAPIC timer: {} counts per 10 ms, calibrated against the {}",
+        TIMER_COUNT.load(Ordering::Relaxed),
+        if power.pm_timer != 0 { "ACPI PM timer" } else { "8254 (no PM timer)" }
+    ));
     // Route only keyboard input through IOAPIC; each CPU has its own LAPIC timer.
     //
     // Some real hardware reports more than one IOAPIC in its ACPI MADT (a

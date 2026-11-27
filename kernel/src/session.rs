@@ -18,6 +18,9 @@ use crate::capability::{Capability, CapabilitySet};
 
 /// The session's process id; 0 before a session starts.
 static SESSION: AtomicU64 = AtomicU64::new(0);
+/// The session's process, to tell when it has exited.
+#[cfg(feature = "system-apps")]
+static SESSION_PROCESS: spin::Mutex<Option<crate::task::ProcessId>> = spin::Mutex::new(None);
 static CONSOLE: AtomicBool = AtomicBool::new(false);
 
 #[cfg(any(
@@ -126,7 +129,17 @@ pub fn start(image: &[u8], accounts: Option<&str>) -> Result<u64, Error> {
         .map_err(|_| Error::Spawn)?;
     CONSOLE.store(false, Ordering::Release);
     SESSION.store(pid.as_u64(), Ordering::Release);
+    #[cfg(feature = "system-apps")]
+    {
+        *SESSION_PROCESS.lock() = Some(pid);
+    }
     Ok(pid.as_u64())
+}
+
+/// Whether a session was started and its process has exited.
+#[cfg(feature = "system-apps")]
+pub fn ended() -> bool {
+    SESSION_PROCESS.lock().is_some_and(crate::task::process_exited)
 }
 
 /// The running session's process id.
