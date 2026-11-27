@@ -175,7 +175,6 @@ use textures::{CENTER_TEXTURE, QS_PANEL_TEXTURE, TILE, TILE_DEPTH_3D, TOAST_TEXT
 /// time, so a missing package simply leaves the shortcut inert.
 const DESKTOP_ICON_NAMES: [&str; 3] = ["WovenFiles", "WovenTerminal", "WovenStore"];
 /// Default pinned taskbar applications; resolved against the installed catalog.
-const TASKBAR_PINNED: [&str; 3] = ["WovenFiles", "WovenTerminal", "WovenSettings"];
 const DESKTOP_ICON_LABELS: [&str; 3] = ["Files", "Terminal", "Store"];
 
 /// Application ids used by the bounded `woven.search` service, in that
@@ -732,6 +731,10 @@ fn lighten(color: u32, amount: u8) -> u32 {
     )
 }
 
+fn centred(text: &str) -> i32 {
+    (640 - font::text_width(text) as i32) / 2
+}
+
 mod model;
 use model::{load_catalog, matches, App, Child, Note, Toast, TrayIcon, Window};
 
@@ -749,6 +752,14 @@ const TASKBAR_ENTRY_GAP: i32 = 4;
 const START_MENU_WIDTH: i32 = 160;
 const START_MENU_ROW: i32 = 14;
 const OVERVIEW_MARGIN: i32 = 1;
+const OVERVIEW_DASH_ICON: i32 = 40;
+const OVERVIEW_DASH_GAP: i32 = 10;
+const OVERVIEW_DASH_ROW_HEIGHT: i32 = OVERVIEW_DASH_ICON;
+const OVERVIEW_THUMB_WIDTH: i32 = 120;
+const OVERVIEW_THUMB_HEIGHT: i32 = 72;
+const OVERVIEW_THUMB_GAP: i32 = 10;
+const OVERVIEW_THUMB_ROW_HEIGHT: i32 = OVERVIEW_THUMB_HEIGHT;
+const DASH_MAX: usize = 8;
 const OVERVIEW_SEARCH_HEIGHT: i32 = START_MENU_ROW;
 const OVERVIEW_CELL_WIDTH: i32 = START_MENU_WIDTH - 2;
 const OVERVIEW_CELL_HEIGHT: i32 = START_MENU_ROW;
@@ -882,6 +893,28 @@ struct Desktop {
 }
 
 impl Desktop {
+    fn login_card(&self) -> Area {
+        let width = (self.width - 16).clamp(1, 360);
+        Area::new((self.width - width) / 2, self.height / 2 - 130, width, 250)
+            .intersect(self.screen())
+    }
+
+    fn login_account_area(&self, index: usize) -> Area {
+        Area::new(self.width / 2 - 90, self.height / 2 - 41 + index as i32 * 10, 180, 10)
+            .intersect(self.screen())
+    }
+
+    fn login_submit_area(&self) -> Area {
+        Area::new(self.width / 2 - 48, self.height / 2 + 30, 96, 18).intersect(self.screen())
+    }
+
+    fn login_action_area(&self, index: usize) -> Area {
+        const WIDTH: i32 = 74;
+        const GAP: i32 = 6;
+        let total = 3 * WIDTH + 2 * GAP;
+        Area::new((self.width - total) / 2 + index as i32 * (WIDTH + GAP), self.height / 2 + 58, WIDTH, 18)
+            .intersect(self.screen())
+    }
     /// The state before `main` fills in the display, options and catalog.
     const INITIAL: Desktop = Desktop {
         width: 0,
@@ -2595,6 +2628,7 @@ impl Desktop {
     /// uncatchable termination request before the kernel session is closed;
     /// closing revokes inherited credentials immediately, even while a child
     /// is completing scheduler-owned teardown.
+    #[allow(dead_code)]
     fn logout(&mut self) -> Area {
         let _ = self.close_panels();
         self.cancel_pointer_gesture();
@@ -3468,7 +3502,7 @@ impl Desktop {
         let _ = (a, active);
     }
 
-    fn paint_qs_content(&self, canvas: &mut Canvas<'_>, area: Area) {
+    fn paint_qs_content(&self, canvas: &mut Canvas<'_>, area: Area, _background: bool) {
         let (x, y) = (area.x, area.y);
         fill_rounded_blended(canvas, area, 12, theme_panel(), 238);
         outline(canvas, area, blend(theme_stroke(), theme_panel(), 30));
@@ -3858,7 +3892,7 @@ impl Desktop {
     /// in `canvas`. Used both for the ordinary flat 2D panel and, rendered
     /// once at local origin into an offscreen texture, as the source the 3D
     /// mode's perspective projection samples.
-    fn paint_center_content(&self, canvas: &mut Canvas<'_>, area: Area, background: bool) {
+    fn paint_center_content(&self, canvas: &mut Canvas<'_>, area: Area, _background: bool) {
         let (x, y) = (area.x, area.y);
         // Same rounded, near-opaque card treatment as the Quick Settings
         // panel and the lock screen, instead of a hard-edged square outline
