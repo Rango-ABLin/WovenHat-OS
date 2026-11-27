@@ -40,6 +40,18 @@ class DesktopQualificationTests(unittest.TestCase):
         right = b"\x00\x00\x00\xff\x00\xff"
         self.assertEqual(MODULE.changed_pixels(left, right), 1)
 
+    def test_key_events_send_ordered_down_up_pairs(self):
+        events = MODULE.key_events(("1", "ret"))
+        self.assertEqual([event["type"] for event in events], ["key"] * 4)
+        self.assertEqual(
+            [event["data"]["down"] for event in events],
+            [True, False, True, False],
+        )
+        self.assertEqual(
+            [event["data"]["key"]["data"] for event in events],
+            ["1", "1", "ret", "ret"],
+        )
+
     def test_refresh_oracle_rejects_stale_blank_and_incomplete_frames(self):
         one = (4, 12, 4, 4, 4, 4, 14)
         ink, paper = b"\x64\xdc\xb4", b"\x2d\x41\x5a"

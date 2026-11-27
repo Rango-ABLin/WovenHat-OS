@@ -165,6 +165,16 @@ def timing_within(timing: dict[str, float], limits: dict[str, float]) -> list[st
     return failures
 
 
+def key_events(codes: tuple[str, ...]) -> list[dict[str, Any]]:
+    """Build ordered QMP key-down/key-up events for a real input device."""
+    events: list[dict[str, Any]] = []
+    for code in codes:
+        key = {"type": "qcode", "data": code}
+        events.append({"type": "key", "data": {"down": True, "key": key}})
+        events.append({"type": "key", "data": {"down": False, "key": key}})
+    return events
+
+
 class Qmp:
     def __init__(self, port: int, deadline: float, trace: Path | None = None,
                  process: subprocess.Popen[Any] | None = None,
@@ -215,12 +225,14 @@ class Qmp:
         # `send-key` is a monitor convenience command.  Explicit key events
         # exercise the same input device path as an interactive QEMU window
         # and remain reliable when the guest is headless (`-display none`).
-        self.command("input-send-event", {"events": [
-            {"type": "key", "data": {"down": True, "key": {"type": "qcode", "data": code}}},
-            {"type": "key", "data": {"down": False, "key": {"type": "qcode", "data": code}}},
-        ]})
+        self.command("input-send-event", {"events": key_events((code,))})
         if hold_ms > 0:
             time.sleep(hold_ms / 1000.0)
+
+    def keys(self, codes: tuple[str, ...]) -> None:
+        """Send one bounded key batch, so the guest processes it in one turn."""
+        if codes:
+            self.command("input-send-event", {"events": key_events(codes)})
 
     def relative_mouse(self, dx: int, dy: int) -> None:
         events = []
@@ -634,14 +646,26 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
             screenshots.append(sign_in.name)
 
             input_started = time.monotonic()
-            for attempt in range(3):
-                for key in ("1", "2", "3", "4", "ret"):
-                    qmp.key(key, 150)
-                    time.sleep(0.4)
-                if "woven-shell: signed in: ada" in read_serial(serial):
+            input_deadline = input_started + args.input_timeout
+            pin_marker = "woven-shell: signed in: ada"
+            # Send all five key-down/key-up pairs as one QMP input event. The
+            # shell polls a bounded input batch, so this is one genuine keyboard
+            # turn rather than five host-paced repaints. The signed-in marker,
+            # retry bound and input-to-frame timing limit are unchanged.
+            for _attempt in range(3):
+                qmp.keys(("1", "2", "3", "4", "ret"))
+                retry_deadline = min(time.monotonic() + 2.0, input_deadline)
+                while time.monotonic() < retry_deadline:
+                    if pin_marker in read_serial(serial):
+                        break
+                    if process.poll() is not None:
+                        raise GateFailure(
+                            f"QEMU exited before marker {pin_marker!r} for sign_in_input_ms"
+                        )
+                    time.sleep(0.05)
+                if pin_marker in read_serial(serial):
                     break
-                time.sleep(0.5)
-            wait_marker(serial, "woven-shell: signed in: ada", time.monotonic() + args.input_timeout,
+            wait_marker(serial, pin_marker, input_deadline,
                         process, "sign_in_input_ms", timings, input_started)
             # The sign-in marker is published before the first unlocked frame
             # reaches the scanout. Waiting for the shell's explicit first-frame

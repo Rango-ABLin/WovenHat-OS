@@ -9,8 +9,8 @@
       "display": "virtio-vga",
       "resolution": "1280x800",
       "tolerance_percent": 0.1,
-      "approved_utc": "2026-11-23",
-      "rationale": "Re-approved for the current Win11 desktop/Quick Settings source after the later visual edits changed the centered sign-in card. Deterministic scene: no clock, no animation, no input-dependent state. Captured from audit-artifacts/status-indicators-1cpu-functional/sign-in.ppm (byte-identical across three independent 1-CPU boots), following a PASS of the functional desktop journey and the full RUN-STAGE10.7.ps1 gate (exit 0). Visually inspected: rounded card, avatar, account pills and PIN prompt intact. The previous Stage 3 baseline is retained alongside as sign-in-1280x800-virtio-vga.stage3-20261123.ppm."
+      "approved_utc": "2026-11-27",
+      "rationale": "Re-approved for the intentional flat-compositor default introduced by 36da4931; the previous 3D-projection baseline is preserved as sign-in-1280x800-virtio-vga.3d-20261123.ppm, and the older Stage 3 capture remains as sign-in-1280x800-virtio-vga.stage3-20261123.ppm. Deterministic scene: no clock, no animation, no input-dependent state. This PPM is byte-identical across three independent 1-CPU VirtIO-GPU boots at source 36da4931 (SHA256 2713645622A311910D31F04E133F77DE0B0A2BC82C7C0EB6733AA9BAF838C6AC), captured before input; evidence: audit-artifacts/desktop-qualification-p0-signin-20261127/. Rounded card, avatar, account pills and PIN prompt remain intact. The 0.1% tolerance is unchanged. This approves the flat-path visual scene only; the full functional/timing gate still requires a serialized rerun because a concurrent `cargo test --workspace` inflated sign-in input timing in the capture run."
     }
   ],
   "deferred": [
