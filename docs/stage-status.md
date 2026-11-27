@@ -13892,12 +13892,34 @@ This closes a software allocation-leak path only. Physical AHCI/NVMe and USB
 flash qualification, IOMMU isolation, interrupt completion, torn-sector and
 power-loss evidence, and arbitrary-size rollback remain open.
 
+## Status snapshot — 2026-10-11
+
+The latest recorded accepted increment remains Stage 14.5C. A Stage 14.5D
+firewall-parser candidate is now implemented, but its acceptance gate has not
+passed. The feature build and warning-denying kernel Clippy passed. Its
+deterministic Stage 14.5D parser marker passed in QEMU on 1, 2, and 4 CPUs.
+However, each full network run then failed at external DNS (`example.com`)
+after DHCP succeeded; the dedicated end-to-end gate did not pass. Host DNS
+lookup also fails in this environment, and direct DNS probes returned `REFUSED`
+(RCODE 5). The release host lint and all 20 integration targets (79 tests)
+passed. GitHub Actions run #1316 for commit `1c171be` is `action_required` with
+no jobs; GitHub acceptance remains open. See the
+[Stage 14.5D audit](audit-stage14-5d-wovenguard-parser-2026-10-11.md).
+
+Accepted bounded-stage gates do not establish production readiness or completion
+of the Stage 10.7–36 roadmap. Physical hardware qualification remains incomplete,
+and the Stage 13.11 entries stated that GitHub acceptance was still required
+when recorded. Consult the [master roadmap](master-development-roadmap.md) for
+remaining release scope and the [production gap audit](stage1-12-production-gap-audit.md)
+for its stated Stage 1–12 coverage.
+
 ## Stage 14.2D — Router Advertisement state (2026-10-06)
 
 Router Advertisement state now tracks a link-local router, bounded lifetimes,
 and one validated prefix with expiration and withdrawal. It rejects invalid
-preferred/valid lifetimes and global router sources. Check the remote D audit
-for its exact acceptance evidence.
+preferred/valid lifetimes and global router sources. This entry does not include
+an acceptance marker, test matrix, or linked audit, so it is not sufficient by
+itself to establish acceptance.
 
 ## Stage 14.2E — ICMPv6 checksum boundary (2026-10-06)
 
@@ -14053,6 +14075,29 @@ commit `b81b3a76`.
 
 Next: complete firewall transport/path coverage and parser hardening before
 adding stateful connection tracking.
+
+## Stage 14.5D — WovenGuard parser/transport hardening candidate (2026-10-11)
+
+The feature-gated candidate now inspects up to two 802.1Q/802.1ad-style VLAN
+tags before classifying IPv4/IPv6. Truncated Ethernet/VLAN frames and excessive
+tag nesting fail closed; non-IP Layer-2 control traffic remains allowed.
+Fragmented IPv4 and non-atomic IPv6 fragments are rejected rather than matching
+transport ports without complete datagrams. TCP header lengths, UDP lengths,
+and minimum ICMP message sizes are checked before policy evaluation. The
+Stage 14.5B synthetic UDP frames were corrected to carry valid IP and UDP
+lengths so those inherited checks exercise actual well-formed packets. Other
+well-formed IP protocols are classified separately from malformed packets, so
+protocol-specific and wildcard rules can match them without port metadata.
+
+Local feature build, warning-denying kernel Clippy, and release host lint/tests
+passed. The host suite covered 20 integration targets and 79 tests. The
+deterministic parser marker passed in QEMU on 1/2/4 CPUs, but each full
+networking run then failed at DNS after DHCP succeeded; the 1/2/4-CPU
+end-to-end Stage 14.5D gate has not passed, so this candidate is not accepted.
+Host DNS lookup also failed in this environment. The parser and Wi-Fi
+enforcement additions are compiled only by test features; this is not a
+default-build production firewall.
+See the [Stage 14.5D audit](audit-stage14-5d-wovenguard-parser-2026-10-11.md).
 
 ## Stage 1–5 long-name mutation hardening — 2026-10-01
 

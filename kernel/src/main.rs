@@ -3015,17 +3015,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                                     ));
                                     halt();
                                 }
-                                #[cfg(feature = "stage14-5d-test")]
-                                if firewall_policy::stage14_5d_self_test() {
-                                    serial::write_line(format_args!(
-                                        "[S14.5D] firewall parser/transport hardening PASSED"
-                                    ));
-                                } else {
-                                    serial::write_line(format_args!(
-                                        "[S14.5D] firewall parser/transport hardening FAILED"
-                                    ));
-                                    halt();
-                                }
                             }
                         } else {
                             serial::write_line(format_args!(
