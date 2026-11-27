@@ -164,10 +164,18 @@ On mount, after choosing the authoritative superblock:
    descriptor, or its checksum does not match the staged data, the transaction
    was never committed. It is discarded and the filesystem is left exactly as it
    was before the transaction began.
-3. Otherwise the transaction is committed but possibly only partly applied, so
+3. Before any target writes, reject a committed descriptor with duplicate or
+   out-of-range targets, or targets in the superblock or journal sectors.
+   Transaction creation applies the same checks before writing the journal.
+4. Otherwise the transaction is committed but possibly only partly applied, so
    every staged data sector is written to its target again. Replay is
    **idempotent** — applying it twice is identical to applying it once — so a
    crash during recovery is itself recoverable.
+
+The commit checksum covers staged data, not descriptor target addresses. The
+target checks protect reserved sectors and prevent duplicate or out-of-range
+replay, but do not authenticate a descriptor or detect redirection between
+otherwise valid targets.
 
 ### The resulting guarantee
 

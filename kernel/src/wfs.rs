@@ -582,6 +582,25 @@ fn staged_checksum(blocks: &[StagedBlock]) -> u64 {
     })
 }
 
+fn validate_journal_targets(sb: &SuperBlock, blocks: &[StagedBlock]) -> Result<(), Error> {
+    let journal_end = sb
+        .journal_start
+        .checked_add(u64::from(sb.journal_blocks))
+        .ok_or(Error::Corrupt)?;
+    for (index, block) in blocks.iter().enumerate() {
+        if block.target < 2
+            || block.target >= sb.total_blocks
+            || (sb.journal_start..journal_end).contains(&block.target)
+            || blocks[..index]
+                .iter()
+                .any(|previous| previous.target == block.target)
+        {
+            return Err(Error::Corrupt);
+        }
+    }
+    Ok(())
+}
+
 // ------------------------------------------------------------------- volume
 
 /// A mounted WovenFS volume.
@@ -906,20 +925,14 @@ impl<D: BlockDevice> Volume<D> {
         }; MAX_TXN_BLOCKS];
         for (index, slot) in blocks.iter_mut().take(count).enumerate() {
             let target = read_u64(&descriptor, 24 + index * 8);
-            if target >= sb.total_blocks {
-                return Ok(());
-            }
             let mut data = [0u8; SECTOR_SIZE];
             self.device
                 .read_sector(sb.journal_start + 1 + index as u64, &mut data)?;
-            // Save original data at the target LBA for potential rollback.
-            let mut original = [0u8; SECTOR_SIZE];
-            self.device.read_sector(target, &mut original)?;
             *slot = StagedBlock {
                 target,
                 data,
-                original_data: original,
-                has_original: true,
+                original_data: [0; SECTOR_SIZE],
+                has_original: false,
             };
         }
         if read_u64(&commit, 16) != staged_checksum(&blocks[..count]) {
@@ -929,6 +942,12 @@ impl<D: BlockDevice> Volume<D> {
             return Ok(());
         }
 
+        validate_journal_targets(&sb, &blocks[..count])?;
+        for block in &mut blocks[..count] {
+            self.device
+                .read_sector(block.target, &mut block.original_data)?;
+            block.has_original = true;
+        }
         for block in &blocks[..count] {
             self.device.write_sector(block.target, &block.data)?;
         }
@@ -960,6 +979,7 @@ impl<D: BlockDevice> Volume<D> {
         }
         let sb = self.super_block;
         let count = txn.len;
+        validate_journal_targets(&sb, &txn.blocks[..count])?;
         let transaction_id = sb.sequence.wrapping_add(1).max(1);
 
         let mut descriptor = [0u8; SECTOR_SIZE];
