@@ -260,7 +260,8 @@ stage19-app-catalog-test = ["qemu-test"]
 # Production image build: install the signed system-app catalog during boot.
 system-apps = []
 # Disposable live-hardware demo: system apps plus documented sample accounts.
-hardware-demo = ["system-apps"]
+hardware-demo = ["system-apps", "qemu-test"]
+stage14-6-test = ["qemu-test"]
 # Full printable-ASCII font and text layout.
 stage17-1-test = ["qemu-test"]
 # Bundled OFL TrueType load/raster qualification.

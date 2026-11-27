@@ -103,8 +103,6 @@ mod irq_lock;
 mod journal;
 mod keyboard;
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
-mod diagnostics;
-#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 mod livelog;
 mod memory;
 pub mod memory_pressure;
