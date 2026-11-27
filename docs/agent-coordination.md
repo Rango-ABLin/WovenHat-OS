@@ -1,3 +1,16 @@
+## OpenCode - app mutations on persistent /mnt (2026-11-27) - DONE
+
+Took the Tier 2 `/mnt` provisioning item. Guest TLS was evaluated first and is
+blocked offline: no cached `aes-gcm`/`chacha20` crate exists to build a pure-
+Rust TLS 1.3 AEAD provider, and `ring` has no C sysroot here. For the `/mnt`
+item, two real defects were fixed: the FAT32 mount point was root-owned 0755
+so user tasks got VFS `ReadOnly` (now `0o1777` in `storage::mount_device`, with
+capability/sandbox still authoritative), and the probe name was not FAT 8.3.
+The harness now requires a `persistent mount mutations` marker. Gate PASSES at
+1/2/4 CPUs; fmt, all-target Clippy, workspace tests and feature Clippy pass.
+No new syscall, capability or ABI. Scope: `kernel/src/{main,storage}.rs` and
+`scripts/test-native-app-mutations.py`; no overlap with other owners' WIP.
+
 ## Copilot - filesystem/release/desktop gap closure (2026-11-27) - DONE
 
 Patching audited gaps: FAT32 capacity proof, bounded WovenFS batch rollback and

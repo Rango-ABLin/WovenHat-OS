@@ -1,5 +1,32 @@
 # Stage status
 
+## App mutations on persistent /mnt - 2026-11-27 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+The native WovenFiles mutation gate previously ran its app-level `--mkdir`,
+`--write`, `--rename` and `--rm` sequence under `/tmp`, while only the kernel's
+own `[STORAGE MUTATION]` marker exercised the mounted FAT32. Two real defects
+blocked moving the app to `/mnt`: the mount point was created root-owned with
+mode `0755`, so a uid-1000 user task failed the VFS parent write check with
+`ReadOnly` even though its `FileWrite` capability and `Mounted` sandbox scope
+were valid; and the probe directory used a 14-character name that FAT32's
+8.3-only `mkdir_path` rejects as `BadName`. `storage::mount_device` now gives
+the FAT32 `/mnt` mount point the same `0o1777` VFS mode as `/tmp` (capability,
+sandbox file scope and mounted-path policy remain the authorizing checks), and
+the self-test uses the 8.3 name `mutprobe`. A new
+`[NATIVE-APP] persistent mount mutations: PASSED` marker is required by the
+harness, so a silent fallback to `/tmp` cannot pass.
+
+Validation: `cargo fmt --all -- --check`, warning-denying `cargo clippy
+--all-targets`, workspace tests and warning-denying kernel Clippy for
+`native-app-mutation-test` pass. `scripts/test-native-app-mutations.py` PASSES
+at 1/2/4 CPUs with exit 33, all five mutation steps, the persistent-mount
+marker and the kernel `[STORAGE MUTATION]` marker
+(`audit-artifacts/native-app-mutations-{1,2,4}cpu`). A `--memory` option was
+added to that harness (default unchanged at 5G) because host virtual memory
+would not reserve 5G; no assertion, timeout or budget changed. This is bounded
+software/QEMU evidence against a disposable FAT32 image, not native-media or
+power-loss qualification.
+
 ## Audited filesystem, release and desktop gaps - 2026-11-27 - ACCEPTED (BOUNDED)
 
 Closed the actionable current-head gaps: FAT32 mounting now proves that its
