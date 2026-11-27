@@ -2704,6 +2704,13 @@ impl Desktop {
 
     /// A key at the lock screen. Returns the area to repaint.
     fn lock_key(&mut self, key: Key) -> Area {
+        // TEMPORARY P0 DIAGNOSTIC: correlate host injection with guest input
+        // consumption without changing routing or ordering.
+        let mut key_ticks = [0u8; 20];
+        log(&[
+            b"woven-shell: diagnostics lock key ticks=",
+            libwoven::format_u64(libwoven::ticks(), &mut key_ticks),
+        ]);
         match key {
             Key::F2 if self.mode == LockMode::SignIn => self.power(false),
             Key::F3 if self.mode == LockMode::SignIn => self.power(true),
@@ -2747,6 +2754,7 @@ impl Desktop {
                     }
                     _ => self.pin_matches(),
                 } {
+                    let identity_started = libwoven::ticks();
                     let kernel_authenticated = match self.mode {
                         LockMode::SignIn => match self.accounts[self.chosen] {
                             Some(account) => {
@@ -2783,6 +2791,17 @@ impl Desktop {
                         },
                         LockMode::ChangePin => true,
                     };
+                    // TEMPORARY P0 DIAGNOSTIC: measure the bounded kernel
+                    // identity verification separately from input delivery.
+                    let identity_ticks = libwoven::ticks().saturating_sub(identity_started);
+                    let mut identity_start_digits = [0u8; 20];
+                    let mut identity_digits = [0u8; 20];
+                    log(&[
+                        b"woven-shell: diagnostics identity verify start_ticks=",
+                        libwoven::format_u64(identity_started, &mut identity_start_digits),
+                        b" elapsed_ticks=",
+                        libwoven::format_u64(identity_ticks, &mut identity_digits),
+                    ]);
                     if !kernel_authenticated {
                         self.failures += 1;
                         self.prompt = LockPrompt::Wrong;

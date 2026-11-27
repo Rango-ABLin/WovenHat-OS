@@ -24,6 +24,19 @@ classifier remains Tier 2 with zero native passes. No boot entry, TPM, firmware
 or other device was touched; the spare disk still carries WovenFS. Evidence and
 limits: `docs/audit-z3-phase1-native-storage-2026-11-27.md`.
 
+## OpenCode - P0 real-QEMU desktop gate diagnosis (2026-11-27) - ACTIVE
+
+Continuing the P0 gap on current `master` (`c37bdafd`). Repaired stale
+WovenFiles/Settings/Terminal geometry in `scripts/test-desktop-qualification.py`
+and re-approved the deterministic flat-path sign-in reference without changing
+the 0.1% tolerance; the superseded card is preserved as
+`sign-in-1280x800-virtio-vga.pre-login-controls-20261123.ppm`. The serialized
+1-CPU TCG/VirtIO-GPU gate now reaches the full journey but still fails only on
+`sign_in_input_ms` (~22.7 s against the unchanged 20 s limit). Diagnosing the
+guest-side PIN/KDF handoff with diagnostic-only timing fields; no assertion,
+timeout, security policy or production-closure claim is being changed. Please
+coordinate QEMU acceptance-chain starts and WovenFS/identity source edits.
+
 ## OpenCode - Stage 29 hardware qualification Z1/Z2 (2026-11-27) - DONE (Z3 BLOCKED)
 
 Took the read-only hardware-qualification bit. Repaired the `physical-probe`

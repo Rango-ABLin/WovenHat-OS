@@ -28,16 +28,17 @@ just manual inspection).
 - `sign-in-1280x800-virtio-vga.ppm` — the locked sign-in card at 1280×800,
   captured through a single `virtio-vga,id=gpu0` device with QMP
   `screendump(device=gpu0, head=0)` before any input is injected. Re-approved
-  2026-11-27 for the intentional flat-compositor default at source `36da4931`:
+  2026-11-27 for the intentional sign-in-card evolution (date, unified type
+  roles, selected-account pill, card geometry and sign-in/power controls):
   the card is byte-identical across three independent 1-CPU boots, and the
   0.1% tolerance is unchanged. This is the active gate reference listed in
   `baseline-manifest.json`; a matching-dimension pixel difference fails the
   desktop qualification. PPM (P6) is used rather than PNG so the comparator
   needs no Pillow installation.
-- `sign-in-1280x800-virtio-vga.3d-20261123.ppm` — preserved previous 3D-path
-  reference. `sign-in-1280x800-virtio-vga.stage3-20261123.ppm` is the older
-  Stage 3 reference. Both remain as history; only the file named in
-  `baseline-manifest.json` is enforced.
+- `sign-in-1280x800-virtio-vga.pre-login-controls-20261123.ppm` — preserved
+  superseded sign-in-card reference. `sign-in-1280x800-virtio-vga.stage3-20261123.ppm`
+  is the older Stage 3 reference. Both remain as history; only the file named
+  in `baseline-manifest.json` is enforced.
 - `sign-in-virtio-gpu-640x480.png` — the WovenHat sign-in screen
   (navy-to-teal wallpaper with the diagonal weave motif, account picker,
   PIN prompt), captured 2026-11-03 through the virtio-gpu 2D presentation

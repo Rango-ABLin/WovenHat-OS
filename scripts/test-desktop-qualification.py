@@ -652,8 +652,16 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
             # shell polls a bounded input batch, so this is one genuine keyboard
             # turn rather than five host-paced repaints. The signed-in marker,
             # retry bound and input-to-frame timing limit are unchanged.
-            for _attempt in range(3):
+            for attempt in range(1, 4):
+                batch_started = time.monotonic()
                 qmp.keys(("1", "2", "3", "4", "ret"))
+                timings[f"sign_in_pin_batch_{attempt}_ms"] = (
+                    time.monotonic() - batch_started
+                ) * 1000.0
+                if attempt == 1:
+                    wait_marker(serial, "woven-shell: diagnostics lock key ticks=",
+                                input_deadline, process, "diagnostic_first_key_seen_ms",
+                                timings, input_started)
                 retry_deadline = min(time.monotonic() + 2.0, input_deadline)
                 while time.monotonic() < retry_deadline:
                     if pin_marker in read_serial(serial):
@@ -664,6 +672,9 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
                         )
                     time.sleep(0.05)
                 if pin_marker in read_serial(serial):
+                    timings[f"sign_in_marker_after_batch_{attempt}_ms"] = (
+                        time.monotonic() - input_started
+                    ) * 1000.0
                     break
             wait_marker(serial, pin_marker, input_deadline,
                         process, "sign_in_input_ms", timings, input_started)
