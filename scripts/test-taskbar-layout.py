@@ -73,6 +73,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--qemu", type=Path, default=Path(dq.DEFAULT_QEMU))
     parser.add_argument("--firmware", type=Path)
     parser.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
+    parser.add_argument("--alignment", choices=("left", "center"), default="left")
+    parser.add_argument("--icon-size", choices=("small", "medium", "large"), default="large")
     parser.add_argument("--memory", default="5G")
     parser.add_argument("--timeout", type=float, default=180.0)
     parser.add_argument("--input-timeout", type=float, default=60.0)
@@ -97,7 +99,11 @@ def main(argv: list[str] | None = None) -> int:
         "physical_hardware_touched": False,
         "reboot_requested": False,
         "output": str(output),
-        "requested_layout": {"alignment": "left", "icon_size": "large", "auto_hide": "off"},
+        "requested_layout": {
+            "alignment": args.alignment,
+            "icon_size": args.icon_size,
+            "auto_hide": "off",
+        },
     }
     blockers = dq.preflight(qemu, firmware)
     if blockers:
@@ -119,8 +125,8 @@ def main(argv: list[str] | None = None) -> int:
         )
     }
     try:
-        os.environ["WOVENHAT_SHELL_TASKBAR_ALIGNMENT"] = "left"
-        os.environ["WOVENHAT_SHELL_TASKBAR_ICON_SIZE"] = "large"
+        os.environ["WOVENHAT_SHELL_TASKBAR_ALIGNMENT"] = args.alignment
+        os.environ["WOVENHAT_SHELL_TASKBAR_ICON_SIZE"] = args.icon_size
         os.environ["WOVENHAT_SHELL_TASKBAR_AUTO_HIDE"] = "off"
         image = dq.build_hardware_demo(output)
         serial = output / "serial.log"
@@ -151,7 +157,10 @@ def main(argv: list[str] | None = None) -> int:
                 serial, "woven-shell: desktop ready", started + args.timeout,
                 process, "desktop_ready_ms", timings, started,
             )
-            layout_marker = "woven-shell: taskbar layout alignment=left icon_size=large auto_hide=off"
+            layout_marker = (
+                f"woven-shell: taskbar layout alignment={args.alignment} "
+                f"icon_size={args.icon_size} auto_hide=off"
+            )
             dq.wait_marker(
                 serial, layout_marker, started + args.timeout,
                 process, "taskbar_layout_marker_ms", timings, started,
@@ -174,7 +183,7 @@ def main(argv: list[str] | None = None) -> int:
                 serial, "woven-shell: desktop frame ready", frame_ready + args.input_timeout,
                 process, "desktop_frame_ready_ms", timings, frame_ready,
             )
-            frame = output / "taskbar-layout-left-large.ppm"
+            frame = output / f"taskbar-layout-{args.alignment}-{args.icon_size}.ppm"
             _, _, pixels = dq.capture_frame(
                 qmp, frame, time.monotonic() + args.frame_timeout, timings, "taskbar_layout"
             )
@@ -184,7 +193,17 @@ def main(argv: list[str] | None = None) -> int:
             # button is 58x16 at y=bar_top+4; sample an interior point in
             # physical pixels. The centered default would place Start near
             # logical x=106 for 3 medium pins, leaving the left area as bar bg.
-            left_start_x0, left_start_x1 = 16 + 4, 16 + 116  # physical x span covering start
+            controls_left = 358
+            entry_width = {"small": 40, "medium": 48, "large": 56}[args.icon_size]
+            group_width = 58 + 8 + 3 * entry_width + 2 * 4
+            expected_start = (
+                8
+                if args.alignment == "left"
+                else (8 + (controls_left - 8) // 2 - group_width // 2)
+            )
+            expected_start = max(8, min(expected_start, controls_left - group_width))
+            start_x = expected_start * 2
+            start_x0, start_x1 = start_x + 4, start_x + 116
             start_y0, start_y1 = STRIP_TOP + 8, STRIP_TOP + 40
             # Sample bar background from the empty strip between the app group and
             # right-side controls (left+large with 3 default pins leaves this empty).
@@ -202,7 +221,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             if not left_has_content:
                 raise dq.GateFailure(
-                    "left-aligned Start button area does not differ from bar background"
+                    f"{args.alignment}/{args.icon_size} Start area does not differ from bar background"
                 )
 
             result = dict(base)
@@ -215,7 +234,7 @@ def main(argv: list[str] | None = None) -> int:
                 "timings_ms": {**timings},
                 "layout_marker": layout_marker,
                 "pixel_checks": {
-                    "left_start_has_content": left_has_content,
+                    "expected_start_has_content": left_has_content,
                     "old_center_origin_background_like": old_origin_bg_like,
                     "bar_background_sample": list(bar_bg),
                 },

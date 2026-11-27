@@ -4358,10 +4358,14 @@ impl Desktop {
         window.width = next_w;
         window.height = next_h;
         window.maximized = next_maximized;
-        // Frame-only maximize: keep the client's current surface and blit it
-        // inside the band-filling frame. Asking the client to reflow via WSIZ
-        // can race with concurrent compositor work on slow 1-CPU QEMU runs;
-        // client reflow on maximize is a follow-up once that path is proven.
+        if (window.surface_w, window.surface_h) != (next_w, next_h) {
+            let mut request = [0u8; 8];
+            request[..4].copy_from_slice(b"WSIZ");
+            request[4..6].copy_from_slice(&(next_w as u16).to_le_bytes());
+            request[6..].copy_from_slice(&(next_h as u16).to_le_bytes());
+            window.resizing_until = libwoven::ticks() + RESIZE_GRACE;
+            let _ = libwoven::message_send(window.owner, &request);
+        }
         if next_maximized {
             log(&[
                 b"woven-shell: window maximized: ",

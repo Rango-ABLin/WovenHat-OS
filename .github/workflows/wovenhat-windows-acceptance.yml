@@ -2,6 +2,9 @@ name: WovenHat Windows QEMU Acceptance
 
 on:
   workflow_dispatch:
+  pull_request:
+  push:
+    branches: [master, main]
 
 permissions:
   contents: read
@@ -71,6 +74,27 @@ jobs:
             -NoProfile `
             -ExecutionPolicy Bypass `
             -File .\RUN-STAGE10.7.ps1
+
+      - name: Run release qualification and exact-ISO package gate
+        shell: powershell
+        run: |
+          $qemu = (Get-Command qemu-system-x86_64.exe).Source
+          $firmware = Join-Path (Split-Path $qemu) "share\edk2-x86_64-code.fd"
+          python scripts/test-release.py --qemu $qemu --firmware $firmware
+          python scripts/package-release.py --qemu $qemu --firmware $firmware
+
+      - name: Run complete taskbar layout matrix
+        shell: powershell
+        run: |
+          $qemu = (Get-Command qemu-system-x86_64.exe).Source
+          $firmware = Join-Path (Split-Path $qemu) "share\edk2-x86_64-code.fd"
+          foreach ($alignment in @("left", "center")) {
+            foreach ($size in @("small", "medium", "large")) {
+              python scripts/test-taskbar-layout.py --qemu $qemu --firmware $firmware `
+                --alignment $alignment --icon-size $size --cpus 1
+              if ($LASTEXITCODE -ne 0) { throw "Taskbar layout failed: $alignment/$size" }
+            }
+          }
 
       - name: Show acceptance evidence
         if: always()

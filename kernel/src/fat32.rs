@@ -336,6 +336,12 @@ pub fn mount(device: &mut impl BlockDevice) -> Result<Volume, Error> {
     if cluster_count < FAT32_MIN_CLUSTERS || root_cluster >= cluster_count.saturating_add(2) {
         return Err(Error::UnsupportedGeometry);
     }
+    let fat_entries = (fat_size as u64)
+        .checked_mul(SECTOR_SIZE as u64 / 4)
+        .ok_or(Error::UnsupportedGeometry)?;
+    if fat_entries < u64::from(cluster_count).saturating_add(2) {
+        return Err(Error::UnsupportedGeometry);
+    }
 
     let fs_info_sector = valid_fs_info_sector(device, fs_info_sector_field, reserved_sectors);
     let backup_fs_info_sector = if backup_boot_sector == 0 {
@@ -4462,6 +4468,24 @@ fn directory_extension_rollback_self_test() -> bool {
 
 #[cfg(test)]
 mod range_tests {
+    use crate::block::{BlockDevice, RamDisk, SECTOR_SIZE};
+
+    fn boot_sector(fat_size: u32, total_sectors: u32) -> [u8; SECTOR_SIZE] {
+        let mut sector = [0u8; SECTOR_SIZE];
+        sector[510..].copy_from_slice(&[0x55, 0xaa]);
+        sector[11..13].copy_from_slice(&(SECTOR_SIZE as u16).to_le_bytes());
+        sector[13] = 1;
+        sector[14..16].copy_from_slice(&32u16.to_le_bytes());
+        sector[16] = 1;
+        sector[17..19].copy_from_slice(&0u16.to_le_bytes());
+        sector[19..21].copy_from_slice(&0u16.to_le_bytes());
+        sector[22..24].copy_from_slice(&0u16.to_le_bytes());
+        sector[32..36].copy_from_slice(&total_sectors.to_le_bytes());
+        sector[36..40].copy_from_slice(&fat_size.to_le_bytes());
+        sector[44..48].copy_from_slice(&2u32.to_le_bytes());
+        sector
+    }
+
     #[test]
     fn unaligned_range_and_eof() {
         assert!(super::range_self_test());
@@ -4469,5 +4493,23 @@ mod range_tests {
     #[test]
     fn existing_fat32_regressions() {
         assert!(super::self_test());
+    }
+
+    #[test]
+    fn mount_rejects_fat_too_small_for_declared_clusters() {
+        let mut disk = RamDisk::<70_000>::boxed_zeroed().unwrap();
+        assert_eq!(disk.write_sector(0, &boot_sector(32, 66_000)), Ok(()));
+        assert!(matches!(
+            super::mount(&mut *disk),
+            Err(super::Error::UnsupportedGeometry)
+        ));
+    }
+
+    #[test]
+    fn mount_accepts_exact_fat_entry_boundary() {
+        let mut disk = RamDisk::<70_000>::boxed_zeroed().unwrap();
+        let boot = boot_sector(512, 66_078);
+        assert_eq!(disk.write_sector(0, &boot), Ok(()));
+        assert!(super::mount(&mut *disk).is_ok());
     }
 }

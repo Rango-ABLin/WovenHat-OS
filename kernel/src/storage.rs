@@ -2243,6 +2243,17 @@ pub fn persist_paths_atomic(paths: &[(&str, &[u8])]) -> Result<(), PersistError>
         return Err(unavailable_persist_error());
     }
     if mnt_wovenfs() {
+        for (index, (path, _)) in paths.iter().enumerate() {
+            if paths[..index].iter().any(|(previous, _)| previous == path) {
+                return Err(PersistError::BadName);
+            }
+        }
+        struct OldFile {
+            path: alloc::string::String,
+            data: alloc::vec::Vec<u8>,
+            existed: bool,
+        }
+        let mut old = alloc::vec::Vec::with_capacity(paths.len());
         for (path, data) in paths {
             if !path.starts_with("/mnt/")
                 || path[5..].is_empty()
@@ -2253,6 +2264,21 @@ pub fn persist_paths_atomic(paths: &[(&str, &[u8])]) -> Result<(), PersistError>
             {
                 return Err(PersistError::BadName);
             }
+            let mut previous = [0u8; crate::wfs::MAX_FILE_SIZE];
+            let result = crate::wfs::read_vfs_path_durable(path, &mut previous);
+            let (existed, length) = match result {
+                Ok(length) => (true, length),
+                Err(crate::wfs::Error::NotFound) => (false, 0),
+                Err(_) => return Err(PersistError::Failed),
+            };
+            old.push(OldFile {
+                path: alloc::string::String::from(*path),
+                data: previous[..length].to_vec(),
+                existed,
+            });
+        }
+        let mut completed = 0usize;
+        for (path, data) in paths {
             let mut image = [0u8; crate::wfs::MAX_FILE_SIZE];
             let native = crate::wfs::write_vfs_path_at_with_publish(
                 path,
@@ -2263,9 +2289,30 @@ pub fn persist_paths_atomic(paths: &[(&str, &[u8])]) -> Result<(), PersistError>
                 |_, _, _| Ok::<(), ()>(()),
             );
             match native {
-                Ok(Ok(())) => {}
-                Ok(Err(_)) => return Err(PersistError::Failed),
-                Err(_) => return Err(PersistError::Failed),
+                Ok(Ok(())) => completed += 1,
+                Ok(Err(_)) | Err(_) => {
+                    for previous in old[..completed].iter().rev() {
+                        let mut rollback = [0u8; crate::wfs::MAX_FILE_SIZE];
+                        let result = if previous.existed {
+                            crate::wfs::write_vfs_path_at_with_publish(
+                                &previous.path,
+                                0,
+                                &previous.data,
+                                &mut rollback,
+                                crate::timer::ticks(),
+                                |_, _, _| Ok::<(), ()>(()),
+                            )
+                            .map(|_| ())
+                        } else {
+                            crate::wfs::unlink_vfs_path(&previous.path, crate::timer::ticks())
+                        };
+                        if result.is_err() {
+                            return Err(PersistError::Failed);
+                        }
+                    }
+                    FILE_PAGES.lock().invalidate();
+                    return Err(PersistError::Failed);
+                }
             }
         }
         mark_mnt_dirty();

@@ -1,3 +1,11 @@
+## Copilot - filesystem/release/desktop gap closure (2026-11-27) - ACTIVE
+
+Patching audited gaps: FAT32 capacity proof, bounded WovenFS batch rollback and
+duplicate rejection, complete release-report gate-set binding, exact packaged
+ISO boot acceptance, automatic release workflow coverage, full taskbar
+alignment/icon-size matrix, and client reflow on maximize. Focused Clippy,
+FAT32 host tests, release tests, and desktop 20.10/20.19 matrices pass.
+
 ## OpenCode - compositor blend stall diagnosis (2026-11-27) - ACTIVE
 
 Starting Tier 2 with the `present_region_blended` stall that forced frame-only

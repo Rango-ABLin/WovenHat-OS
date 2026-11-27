@@ -10,6 +10,8 @@ class ReleasePackagerContractTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertNotIn("required.add('system-apps-boot')", source)
-        self.assertIn("required |= {f'system-apps-boot-{cpus}' for cpus in (1, 2, 4)}", source)
+        self.assertIn("required_checks", source)
+        self.assertIn("set(required)", source)
         self.assertIn("apps + ('woven-package', 'woven-ai', 'woven-shell')", source)
+        self.assertIn("required_checks", source)
+        self.assertIn("test-uefi-iso-qemu.py", source)
