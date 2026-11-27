@@ -316,13 +316,8 @@ pub fn emit_panic_dump(rip: u64, rsp: u64, cr2: u64) {
             Field::new("cr2", Value::Hex(cr2)),
         ],
     );
-    #[cfg(not(test))]
-    {
-        crate::serial::write_bytes(&buf[..f.written]);
-        crate::serial::write_bytes(b"\n");
-    }
-    #[cfg(test)]
-    let _ = f;
+    crate::serial::write_bytes(&buf[..f.written]);
+    crate::serial::write_bytes(b"\n");
 }
 
 /// Boot-time self-test for the structured-panic-dump path. Returns `true` when
