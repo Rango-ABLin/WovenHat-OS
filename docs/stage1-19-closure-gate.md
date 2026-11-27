@@ -226,5 +226,11 @@ Decision: BLOCKED | VERIFIED | CLOSED
 - `with_ata_volume()` mounts for the duration of a closure, but this is not an end-to-end VFS-backed writable mount.
 - **Remaining evidence:** exercise reboot/remount, stale handles, failure
   injection and crash recovery on the normal VFS path, then qualify a selected
-  non-boot physical device. The bounded software adapter and mount lifecycle
-  are implemented; this does not close the hardware or system-filesystem gate.
+  non-boot physical device. A selected non-boot USB device has now passed the
+  Stage 15.2 physical WovenFS gate under QEMU passthrough on 1/2/4 CPUs, with a
+  final `WOVENFS1` superblock inspection, recorded in
+  `docs/audit-physical-wovenfs-2026-11-25.md`. That still does not prove native
+  boot, the mounted system-filesystem role, Secure Boot, TPM, power-loss
+  recovery, or physical-media fault qualification. The bounded software adapter
+  and mount lifecycle are implemented; this does not close the hardware or
+  system-filesystem gate.
