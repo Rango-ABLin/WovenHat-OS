@@ -138,6 +138,7 @@ pub fn start(image: &[u8], accounts: Option<&str>) -> Result<u64, Error> {
 
 /// Whether a session was started and its process has exited.
 #[cfg(feature = "system-apps")]
+#[allow(dead_code)]
 pub fn ended() -> bool {
     SESSION_PROCESS
         .lock()
