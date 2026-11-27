@@ -10,7 +10,7 @@ use wovenhat_pdf::objects::Reference;
 use wovenhat_pdf::paint::paint_text_preview;
 use wovenhat_pdf::streams::decoded_stream;
 use wovenhat_pdf::xref::{read_table, Entry};
-use wovenhat_pdf::{extract_plain_text, inspect, MAX_TEXT_BYTES};
+use wovenhat_pdf::{extract_plain_text, inspect};
 
 const WIDTH: u32 = 480;
 const HEIGHT: u32 = 320;
