@@ -23,6 +23,19 @@ impl Endpoint {
     pub const fn packed(self) -> u64 {
         (u32::from_be_bytes(self.address) as u64) | (self.port as u64) << 32
     }
+
+    /// `packed`, refusing an invalid endpoint (zero/broadcast address or zero
+    /// port) before any socket work.
+    pub fn packed_checked(self) -> Result<u64, Error> {
+        if self.port == 0
+            || self.address == [0, 0, 0, 0]
+            || self.address == [255, 255, 255, 255]
+        {
+            Err(Error::InvalidEndpoint)
+        } else {
+            Ok(self.packed())
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -164,7 +177,7 @@ impl DnsQuery {
         })
     }
 
-    pub fn poll(&mut self) -> Result<Option<[u8; 4]>, Error> {
+    pub fn poll(&mut self) -> Result<Option<[u8; 4]>, CoreError> {
         let result = dns_poll(self.raw)?;
         if result.is_some() {
             self.finished = true;
@@ -181,7 +194,7 @@ impl Drop for DnsQuery {
     }
 }
 
-pub fn dns_poll(query: u64) -> Result<Option<[u8; 4]>, Error> {
+pub fn dns_poll(query: u64) -> Result<Option<[u8; 4]>, CoreError> {
     let mut address = [0u8; 4];
     let result =
         unsafe { syscall::invoke(syscall::DNS_POLL, query, address.as_mut_ptr() as u64, 0) };

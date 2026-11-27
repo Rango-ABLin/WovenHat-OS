@@ -98,7 +98,7 @@ pub fn connect(proxy: Endpoint, host: &str, port: u16, timeout: u64) -> Result<T
     // Validate before allocating a socket or touching the network.
     let length = encode_connect(host, port, &mut packet)?;
     net::validate_timeout(timeout)?;
-    proxy.packed()?;
+    proxy.packed_checked()?;
     let socket = TcpStream::new()?;
     socket.connect(proxy)?.wait_timeout(&mut [], timeout)?;
     socket.write_all_timeout(&GREETING, timeout)?;
