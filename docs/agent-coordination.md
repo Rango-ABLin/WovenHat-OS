@@ -11430,3 +11430,54 @@ smoke attempted twice (`desktop-qualification-1795516306643836000`,
 kernel build with rustc OOM/STATUS_STACK_BUFFER_OVERRUN (environment, not a
 code regression; shell-only change). No QEMU runtime regression asserted/denied
 by those build failures. No Cargo/QEMU chain active.
+## Codex - remaining branch reconciliation audit (2026-11-27) - DONE
+
+Fetched and pruned origin, then fast-forwarded local master to `9a0d8192`.
+The requested count is exact: origin has master plus 44 non-master branches.
+None of the 44 tips is an ancestor of master. Patch-equivalence inspection
+finds at least one unique patch on every branch (1-129 unique patches each);
+only four patches across two branches are equivalent to master. The tips are
+350-2454 master commits behind and include active worktrees, ordered Stage 12
+and Stage 13 work, overlapping desktop/storage/hardware implementations, and
+previously audited obsolete or unqualified changes. Therefore a blanket merge
+cannot truthfully be marked accepted and no branch is safe to delete yet.
+No source, remote branch, or acceptance gate was changed; this coordination
+record is the only audit edit. A per-branch reconciliation and relevant
+1/2/4-CPU acceptance remains required before exact-tip deletion.
+
+## Codex - safe branch-content verification (2026-11-27) - DONE
+
+At the user's follow-up, refreshed origin again and compared every one of the
+44 non-master remote tips against `origin/master` by final tree and patch
+equivalence. No remote tip has a tree identical to master; each still carries
+feature, test, documentation, or qualification content not represented by the
+current master tree. Local refs include checked-out worktrees for active
+feature branches (`auto/wovenhat-development`, `feature/app-surfaces`,
+`m5/hardware-qualification`, and `phase-b/window-minimize`) plus reconciliation
+worktrees. Force-resetting or deleting those would discard or strand work.
+No branch was merged, reset, or deleted. This is the safe outcome until each
+unique change receives an explicit review and the applicable acceptance gate.
+
+## Codex - feature-preserving reconciliation started (2026-11-27) - ACTIVE
+
+Created and pushed 44 immutable `archive/branch-*` tags, one for every current
+non-master remote tip, before any merge or deletion. These tags preserve exact
+recovery points. Reconciliation will now proceed branch-by-branch into master;
+the first audit sample (`audit/stage11-5-reload-diagnostics`) changes a kernel
+acceptance path and cannot be merged merely from its commit message. No branch
+has been deleted or force-reset.
+
+First completed reconciliation: `docs/graphical-boot-qualification-20261015`
+was documentation-only, merged cleanly as `dadc1923`, pushed to origin/master,
+and its remote branch was deleted. Its exact tip remains recoverable at
+`archive/branch-docs/graphical-boot-qualification-20261015`. Forty-three
+non-master remote branches remain; code-bearing branches still require review
+and their relevant acceptance gates.
+
+Second completed reconciliation: `security/pin-kdf-qualification-20261015`
+was documentation-only, merged as `db036dbd`, pushed, and its remote branch
+deleted; its archive tag remains. The next candidate,
+`fix/desktop-ci-parallel-gates-20261015`, conflicted in
+`.github/workflows/kernel.yml`; the merge was aborted and the branch was
+restored exactly from its archive tag. No content was lost and it remains in
+the review queue.
