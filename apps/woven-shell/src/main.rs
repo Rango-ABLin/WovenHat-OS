@@ -1837,16 +1837,14 @@ impl Desktop {
                     let minimized = self.is_minimized(slot);
                     let hovered =
                         !active && !minimized && area.contains(self.pointer.0, self.pointer.1);
-                    let fill = if active {
-                        lighten(theme_entry(true), 12)
-                    } else if minimized {
-                        blend(theme_entry(false), theme_taskbar(), 90)
-                    } else if hovered {
-                        lighten(theme_entry(false), 8)
-                    } else {
-                        theme_entry(false)
-                    };
-                    fill_rounded(canvas, area, CHROME_RADIUS_SMALL, fill);
+                    if active || hovered {
+                        fill_rounded(
+                            canvas,
+                            Area::new(area.x + 4, area.y + 3, area.width - 8, area.height - 6),
+                            CHROME_RADIUS_SMALL,
+                            blend(theme_entry(active), theme_taskbar(), 90),
+                        );
+                    }
                     // Win11-style running/active indicator: a wide accent bar for the
                     // focused window, a short muted bar for a running one, and a short
                     // dim bar for a minimized one.
@@ -1876,15 +1874,6 @@ impl Desktop {
                         14,
                         minimized,
                     );
-                    let mut title = [0u8; 32];
-                    let length = label(&window.title[..window.title_length], 5, &mut title);
-                    let text = core::str::from_utf8(&title[..length]).unwrap_or("");
-                    let ink = if minimized {
-                        blend(theme_text(), theme_taskbar(), 110)
-                    } else {
-                        theme_text()
-                    };
-                    canvas.draw_text_system(area.x + 18, self.text_y(), text, ink);
                 }
                 TaskbarEntry::PinnedApp(app) => {
                     // A pinned app with no window on this workspace. Same
@@ -1894,16 +1883,14 @@ impl Desktop {
                         continue;
                     };
                     let hovered = area.contains(self.pointer.0, self.pointer.1);
-                    fill_rounded(
-                        canvas,
-                        area,
-                        CHROME_RADIUS_SMALL,
-                        if hovered {
-                            lighten(theme_entry(false), 8)
-                        } else {
-                            theme_entry(false)
-                        },
-                    );
+                    if hovered {
+                        fill_rounded(
+                            canvas,
+                            Area::new(area.x + 4, area.y + 3, area.width - 8, area.height - 6),
+                            CHROME_RADIUS_SMALL,
+                            blend(theme_entry(false), theme_taskbar(), 90),
+                        );
+                    }
                     draw_app_icon(
                         canvas,
                         area.x + 2,
@@ -1912,14 +1899,6 @@ impl Desktop {
                         14,
                         false,
                     );
-                    let shown = app
-                        .name()
-                        .strip_prefix(b"Woven")
-                        .unwrap_or_else(|| app.name());
-                    let mut title = [0u8; 32];
-                    let length = label(shown, 5, &mut title);
-                    let text = core::str::from_utf8(&title[..length]).unwrap_or("");
-                    canvas.draw_text_system(area.x + 18, self.text_y(), text, theme_text());
                 }
             }
         }
