@@ -28,7 +28,13 @@ mod userspace_allocator {
     use core::alloc::{GlobalAlloc, Layout};
     use core::sync::atomic::{AtomicU64, Ordering};
 
-pub mod heap;
+    const ARENA_BYTES: u64 = 64 * 1024;
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    static END: AtomicU64 = AtomicU64::new(0);
+
+    #[cfg(any(test, feature = "reclaiming-allocator"))]
+    #[path = "../heap.rs"]
+    pub mod heap;
 #[cfg(any(test, all(feature = "reclaiming-allocator", target_os = "none")))]
 mod heap_allocator;
 
@@ -334,6 +340,7 @@ pub mod fs {
     pub struct Handle(pub u64);
 }
 pub mod net;
+#[cfg(any(test, feature = "reclaiming-allocator"))]
 pub mod socks5;
 pub mod ipc {
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
