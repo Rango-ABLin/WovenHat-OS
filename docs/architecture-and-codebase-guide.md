@@ -13,9 +13,11 @@ not publication of already-cached VFS nodes. A device error after the commit
 point is indeterminate until remount/recovery.
 
 Host crash-cut tests cover a multi-file batch, including files created in the
-same directory and truncation of an existing file. Installed-image acceptance
-also checks the production adapter's two-file create/read/delete path. Physical
-power loss, controller flush behavior and hardware qualification remain open.
+same directory, truncation and reuse of freed blocks. A second interruption at
+every replay write is tested after each post-commit operation write, followed
+by an idempotent remount. Installed-image acceptance also checks the
+production adapter's two-file create/read/delete path. Physical power loss,
+controller flush behavior and hardware qualification remain open.
 
 ## Short-screen Quick Settings boundary (2026-11-26)
 

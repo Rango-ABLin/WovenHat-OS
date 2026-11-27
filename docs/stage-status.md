@@ -1,5 +1,34 @@
 # Stage status
 
+## WovenFS bounded multi-file batch - 2026-11-27 - VALIDATION IN PROGRESS
+
+The native batch path now stages file creation and exact-length replacement
+together in one bounded journal transaction; it no longer commits each file
+independently. Host crash-cut and capacity tests pass, as do the installed
+normal-reboot, descriptor-cut and staged-payload-cut matrices on 1/2/4 CPUs.
+The first commit-cut run failed before guest startup when QEMU could not
+allocate its 5-GiB guest memory; its logs are retained under
+`target/wfs-atomic-20261127-commit/`. After host memory recovered, commit,
+target, target-flush, checkpoint and retirement interruption matrices passed
+on 1/2/4 CPUs under `target/wfs-atomic-rerun-20261127-*/`. The disposable
+Stage 15.2 device gate also passes on 1/2/4 CPUs. These interruption matrices
+still cover the installed single-file operation, not a multi-file batch.
+Stage 1-5 and Stage 12.2/12.5 regressions pass at 1/2/4 CPUs,
+and the full Stage 10.7 preservation chain passes under
+`target/stage10-output/audit-artifacts/acceptance-20261127-081723-575/`.
+Source `73d2e026` was independently committed and pushed during the chain;
+the remaining gates are still open. This does not claim physical power-loss
+qualification, full stage closure or production readiness. See
+`audit-wovenfs-atomic-batch-2026-11-27.md`.
+
+The host suite now also interrupts multi-file replay at each sector-write
+boundary after each post-commit operation cut, checks all file contents, and
+verifies an idempotent remount. Workspace tests, warning-denying host/kernel
+Clippy and the full Stage 10.7 preservation chain pass, with logs under
+`target/stage10-output/audit-artifacts/acceptance-20261127-085637-330/`.
+This test-only increment does not close the installed multi-file crash or
+physical gates.
+
 ## Stage 10.7 launcher alternate-root repair - 2026-11-26 - BOUNDED PASS
 
 The Windows preservation launcher previously rejected an explicitly supplied

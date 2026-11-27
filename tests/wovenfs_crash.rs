@@ -364,6 +364,85 @@ fn multi_file_validation_and_capacity_fail_before_device_writes() {
 }
 
 #[test]
+fn multi_file_replay_survives_another_crash_at_every_write_boundary() {
+    let base = formatted();
+    {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume.mkdir_path("/docs", 0o755, 1).expect("directory");
+        let inode = volume.create_path("/docs/a", 0o644, 2).expect("file");
+        volume
+            .write_file(inode, &[0x31; SECTOR_SIZE * 3], 3)
+            .expect("old data");
+    }
+    let new_file = [0x62; SECTOR_SIZE * 2];
+    let batch: &[(&str, &[u8])] = &[
+        ("/docs/a", b"short"),
+        ("/docs/b", &new_file),
+        ("/docs/c", b"third"),
+    ];
+    let writes = write_count(&base, |volume| {
+        volume.write_paths_atomic(batch, 4).expect("batch");
+    });
+
+    let descriptor_disk = base.fork(Some(1));
+    let mut volume = Volume::mount(descriptor_disk.clone()).expect("mount");
+    let journal_start = volume.super_block().journal_start as usize;
+    assert_eq!(volume.write_paths_atomic(batch, 4), Err(Error::Device));
+    drop(volume);
+    let descriptor = descriptor_disk.sectors()[journal_start];
+    assert_eq!(&descriptor[..8], wfs::JOURNAL_DESC_MAGIC);
+    let count = u32::from_le_bytes(descriptor[16..20].try_into().expect("count")) as usize;
+    let commit_writes = count + 2;
+    assert!(commit_writes < writes, "batch must have home writes");
+
+    for operation_cut in commit_writes..writes {
+        let pending = base.fork(Some(operation_cut));
+        let mut volume = Volume::mount(pending.clone()).expect("mount");
+        assert_eq!(volume.write_paths_atomic(batch, 4), Err(Error::Device));
+        drop(volume);
+
+        let probe = pending.fork(None);
+        Volume::mount(probe.clone()).expect("replay probe");
+        let replay_writes = probe.writes();
+        assert!(replay_writes > 1, "expected replay and journal retirement");
+
+        for replay_cut in 0..=replay_writes {
+            let interrupted = pending.fork(Some(replay_cut));
+            let first = Volume::mount(interrupted.clone());
+            if replay_cut < replay_writes {
+                assert!(
+                    matches!(&first, Err(Error::Device)),
+                    "operation cut {operation_cut}, replay cut {replay_cut} unexpectedly succeeded"
+                );
+            } else {
+                assert!(first.is_ok(), "complete replay must succeed");
+            }
+            drop(first);
+
+            let settled = interrupted.fork(None);
+            let mut recovered = mount_consistent(
+                &settled,
+                &format!("operation cut {operation_cut}, replay cut {replay_cut}"),
+            );
+            let mut output = [0u8; MAX_FILE_SIZE];
+            for (path, expected) in batch {
+                let inode = recovered.resolve_path(path).expect("batch file");
+                let length = recovered.read_file(inode, &mut output).expect("batch data");
+                assert_eq!(
+                    &output[..length],
+                    *expected,
+                    "operation cut {operation_cut}, replay cut {replay_cut}, {path}"
+                );
+            }
+            drop(recovered);
+            let after_recovery = settled.sectors();
+            Volume::mount(settled.clone()).expect("idempotent remount");
+            assert_eq!(settled.sectors(), after_recovery);
+        }
+    }
+}
+
+#[test]
 fn write_is_atomic_across_every_crash_point() {
     let payload: Vec<u8> = (0..1500u32).map(|index| (index % 251) as u8).collect();
 

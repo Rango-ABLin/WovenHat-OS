@@ -10,9 +10,26 @@ publish new bytes into existing VFS cache entries, and a device error after the
 commit point requires recovery before the outcome is known.
 
 Host crash-boundary tests pass for a batch containing an existing file and
-multiple new files, including validation and capacity rejection. The installed
-adapter and full inherited acceptance are being requalified; this entry is not
-a stage-closure or physical durability claim.
+multiple new files, including validation and capacity rejection. Normal
+installed-image reboot, descriptor-cut and staged-payload-cut tests pass at
+1/2/4 CPUs. The commit-cut attempt failed before guest startup on some boots:
+QEMU could not allocate 5 GiB of guest memory. The failed evidence is retained
+in `target/wfs-atomic-20261127-commit/`. After host memory recovered, the
+commit, target, target-flush, checkpoint and retirement cuts passed at 1/2/4
+CPUs under `target/wfs-atomic-rerun-20261127-*/`; the disposable Stage 15.2
+device gate also passed at 1/2/4 CPUs. These installed interruption tests
+exercise the single-file path; multi-file installed crash testing remains open.
+The full Stage 10.7 preservation chain passed under
+`target/stage10-output/audit-artifacts/acceptance-20261127-081723-575/`.
+This is not a stage-closure or physical durability claim.
+
+The host suite now also cuts power a second time at each replay sector write
+after every post-commit batch-write cut. It verifies all file contents and an
+unchanged subsequent remount, including reuse of blocks freed by a truncated
+file. Workspace tests, warning-denying host/kernel Clippy and the full
+Stage 10.7 chain pass with this test; the latter's evidence is under
+`target/stage10-output/audit-artifacts/acceptance-20261127-085637-330/`.
+The installed multi-file interruption and physical gates remain open.
 
 ## Installed crash-boundary matrix expanded — 2026-11-25
 
