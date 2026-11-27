@@ -17,6 +17,7 @@ def main():
     needle = "unsafe { crate::syscall::invoke(8, ARENA_BYTES, 1, 0) }"
     assert body.count(needle) == 1
     body = body.replace(needle, "crate::mock_mmap()")
+    body = body.replace("crate::syscall::ERROR", "u64::MAX")
     body = body.replace("#[global_allocator]", "")
     body = body.replace("    static ALLOCATOR: Arena = Arena;", """    static ALLOCATOR: Arena = Arena;
     pub(super) fn allocate(n: usize) -> usize {
