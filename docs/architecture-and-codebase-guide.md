@@ -1,5 +1,22 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Bounded WovenFS batch transaction boundary (2026-11-27)
+
+`storage::persist_paths_atomic` routes native batches through one serialized
+WovenFS volume operation. `Volume::write_paths_atomic` resolves the staged
+namespace and stages creates and exact-length replacements into the existing
+bounded journal transaction. Duplicate names, invalid paths, absent parent
+directories and transaction-capacity exhaustion fail before journal commit.
+The native mutation lock covers mount, replay and commit; no new syscall,
+capability or on-disk format is introduced. This is a persistence operation,
+not publication of already-cached VFS nodes. A device error after the commit
+point is indeterminate until remount/recovery.
+
+Host crash-cut tests cover a multi-file batch, including files created in the
+same directory and truncation of an existing file. Installed-image acceptance
+also checks the production adapter's two-file create/read/delete path. Physical
+power loss, controller flush behavior and hardware qualification remain open.
+
 ## Short-screen Quick Settings boundary (2026-11-26)
 
 Quick Settings derives its visible height from the space above the taskbar,

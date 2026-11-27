@@ -2246,28 +2246,24 @@ pub fn persist_paths_atomic(paths: &[(&str, &[u8])]) -> Result<(), PersistError>
         for (path, data) in paths {
             if !path.starts_with("/mnt/")
                 || path[5..].is_empty()
-                || data.len() > crate::wfs::MAX_FILE_SIZE
                 || path[5..]
                     .split('/')
                     .any(|component| component.is_empty() || component == "." || component == "..")
             {
                 return Err(PersistError::BadName);
             }
-            let mut image = [0u8; crate::wfs::MAX_FILE_SIZE];
-            let native = crate::wfs::write_vfs_path_at_with_publish(
-                path,
-                0,
-                data,
-                &mut image,
-                crate::timer::ticks(),
-                |_, _, _| Ok::<(), ()>(()),
-            );
-            match native {
-                Ok(Ok(())) => {}
-                Ok(Err(_)) => return Err(PersistError::Failed),
-                Err(_) => return Err(PersistError::Failed),
+            if data.len() > crate::wfs::MAX_FILE_SIZE {
+                return Err(PersistError::TooLarge);
             }
         }
+        crate::wfs::write_vfs_paths_atomic(paths, crate::timer::ticks()).map_err(|error| {
+            match error {
+                crate::wfs::Error::InvalidName => PersistError::BadName,
+                crate::wfs::Error::TooLarge => PersistError::TooLarge,
+                crate::wfs::Error::NotFound => PersistError::NotFound,
+                _ => PersistError::Failed,
+            }
+        })?;
         mark_mnt_dirty();
         return Ok(());
     }
@@ -3319,10 +3315,42 @@ pub enum InstalledWovenfsPhase {
 }
 
 #[cfg(feature = "installed-wovenfs-qualification")]
+fn installed_wovenfs_batch_self_test() -> bool {
+    const A: &str = "/mnt/WFSBA.TST";
+    const B: &str = "/mnt/WFSBB.TST";
+    const ITEMS: [(&str, &[u8]); 2] = [(A, b"first file"), (B, b"second file")];
+    if crate::wfs::read_vfs_path_durable(A, &mut [0u8; 16]) != Err(crate::wfs::Error::NotFound)
+        || crate::wfs::read_vfs_path_durable(B, &mut [0u8; 16]) != Err(crate::wfs::Error::NotFound)
+        || persist_paths_atomic(&ITEMS).is_err()
+    {
+        return false;
+    }
+    let mut buffer = [0u8; 16];
+    for (path, expected) in ITEMS {
+        if crate::wfs::read_vfs_path_durable(path, &mut buffer) != Ok(expected.len())
+            || &buffer[..expected.len()] != expected
+        {
+            return false;
+        }
+    }
+    if delete_path(A).is_err() || delete_path(B).is_err() {
+        return false;
+    }
+    crate::serial::write_line(format_args!("[INSTALLED WOVENFS] atomic batch: PASSED"));
+    true
+}
+
+#[cfg(feature = "installed-wovenfs-qualification")]
 pub fn installed_wovenfs_self_test() -> Option<InstalledWovenfsPhase> {
     if !mnt_wovenfs() || !system_volume_writable() {
         crate::serial::write_line(format_args!(
             "[INSTALLED WOVENFS] diagnostic: native writable mount unavailable"
+        ));
+        return None;
+    }
+    if !installed_wovenfs_batch_self_test() {
+        crate::serial::write_line(format_args!(
+            "[INSTALLED WOVENFS] diagnostic: atomic batch failed"
         ));
         return None;
     }
@@ -3348,8 +3376,8 @@ pub fn installed_wovenfs_self_test() -> Option<InstalledWovenfsPhase> {
         }
         return Some(InstalledWovenfsPhase::VerifiedOverwritten);
     }
-    if length == WRITTEN.len()
-        && current[..DELETED.len()] == *DELETED
+    if length == DELETED.len()
+        && current[..length] == *DELETED
         && delete_path(PATH).is_ok()
         && healthy()
     {

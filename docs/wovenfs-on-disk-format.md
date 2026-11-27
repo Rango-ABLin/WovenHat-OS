@@ -129,6 +129,23 @@ order.
 **Commit** — magic `WFSJCOMM`, the same transaction id, and a checksum computed
 over every staged data sector. Written last, and written alone.
 
+### Bounded multi-file replacements
+
+The native batch path stages file creation, directory entries, inode metadata,
+allocation bitmaps and complete replacement contents in a single transaction.
+Parent directories must already exist, duplicate paths are rejected, and each
+file is limited to `MAX_FILE_SIZE`. The total number of distinct sectors must
+fit `MAX_TXN_BLOCKS`; exhaustion or invalid input before commit leaves the
+volume unchanged. An individual replacement has the exact supplied length,
+including truncation of longer prior contents.
+
+A device error during or after commit is an indeterminate outcome: the caller
+must remount and inspect the recovered volume before deciding whether it took
+effect. The batch API persists disk state; it does not publish replacement
+bytes into already-cached VFS nodes. These guarantees depend on the block
+device honoring flush ordering and the sector-write assumptions above; they do
+not establish physical-media power-loss qualification.
+
 ### Write path
 
 1. Stage the descriptor, then every data sector, into the journal.

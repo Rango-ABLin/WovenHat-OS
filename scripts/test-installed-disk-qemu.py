@@ -341,12 +341,14 @@ def guest_execution_status(exit_code: int, serial_text: str) -> dict[str, object
 def wovenfs_qualification_status(
     serial_text: str, filesystem: str, expected_marker: str | None = None
 ) -> dict[str, object]:
-    """Require the filesystem-specific installed-image marker when selected."""
+    """Require the phase and atomic-batch markers for installed WovenFS."""
     required = expected_marker or "[INSTALLED WOVENFS] df/fscheck/persistence: PASSED"
+    batch = "[INSTALLED WOVENFS] atomic batch: PASSED"
     return {
         "required": filesystem == "wovenfs",
-        "passed": filesystem != "wovenfs" or required in serial_text,
+        "passed": filesystem != "wovenfs" or (required in serial_text and batch in serial_text),
         "marker": required if filesystem == "wovenfs" else None,
+        "atomic_batch_marker": batch if filesystem == "wovenfs" else None,
     }
 
 

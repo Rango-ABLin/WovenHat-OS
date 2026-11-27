@@ -283,6 +283,87 @@ fn create_is_atomic_across_every_crash_point() {
 }
 
 #[test]
+fn multi_file_replacement_and_creation_are_atomic_at_every_write_boundary() {
+    let base = formatted();
+    {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume.mkdir_path("/docs", 0o755, 1).expect("directory");
+        let inode = volume.create_path("/docs/a", 0o644, 2).expect("file");
+        volume
+            .write_file(inode, b"old longer contents", 3)
+            .expect("old data");
+    }
+    let batch: &[(&str, &[u8])] = &[
+        ("/docs/a", b"new"),
+        ("/docs/b", b"second new file"),
+        ("/docs/c", b"third new file"),
+    ];
+    let writes = write_count(&base, |volume| {
+        volume.write_paths_atomic(batch, 4).expect("batch");
+    });
+    assert!(writes > 3);
+    for cut in 0..=writes {
+        let crashing = base.fork(Some(cut));
+        let mut volume = Volume::mount(crashing.clone()).expect("mount");
+        let _ = volume.write_paths_atomic(batch, 4);
+        drop(volume);
+
+        let settled = crashing.fork(None);
+        let mut recovered = mount_consistent(&settled, &format!("batch crash at {cut}"));
+        let inode = recovered.resolve_path("/docs/a").expect("existing file");
+        let mut bytes = [0u8; MAX_FILE_SIZE];
+        let len = recovered
+            .read_file(inode, &mut bytes)
+            .expect("read existing");
+        if &bytes[..len] == b"old longer contents" {
+            assert_eq!(recovered.resolve_path("/docs/b"), Err(Error::NotFound));
+            assert_eq!(recovered.resolve_path("/docs/c"), Err(Error::NotFound));
+        } else {
+            assert_eq!(&bytes[..len], b"new", "batch crash at {cut}");
+            for (path, expected) in &batch[1..] {
+                let inode = recovered.resolve_path(path).expect("created file");
+                let len = recovered
+                    .read_file(inode, &mut bytes)
+                    .expect("read created");
+                assert_eq!(&bytes[..len], *expected, "batch crash at {cut}");
+            }
+        }
+    }
+}
+
+#[test]
+fn multi_file_validation_and_capacity_fail_before_device_writes() {
+    let base = formatted();
+    let mut volume = Volume::mount(base.clone()).expect("mount");
+    let before = base.writes();
+    assert_eq!(
+        volume.write_paths_atomic(&[("/a", b"one"), ("/a", b"two")], 1),
+        Err(Error::InvalidName)
+    );
+    assert_eq!(
+        volume.write_paths_atomic(&[("/a", b"one"), ("/missing/b", b"two")], 1),
+        Err(Error::NotFound)
+    );
+    let payload = [0x5a; MAX_FILE_SIZE];
+    assert_eq!(
+        volume.write_paths_atomic(
+            &[
+                ("/a", &payload),
+                ("/b", &payload),
+                ("/c", &payload),
+                ("/d", &payload)
+            ],
+            1
+        ),
+        Err(Error::NoSpace)
+    );
+    assert_eq!(base.writes(), before);
+    assert_eq!(volume.resolve_path("/a"), Err(Error::NotFound));
+    drop(volume);
+    mount_consistent(&base, "rejected batch");
+}
+
+#[test]
 fn write_is_atomic_across_every_crash_point() {
     let payload: Vec<u8> = (0..1500u32).map(|index| (index % 251) as u8).collect();
 

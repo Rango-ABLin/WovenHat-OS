@@ -1,3 +1,11 @@
+## Copilot - Stage 1-5 storage recovery investigation (2026-11-27)
+
+Investigating the earliest open WovenFS multi-file transaction and recovery
+prerequisite on master. This entry reserves the storage investigation; no
+physical device, firmware, remote branch, or acceptance output has been
+modified. Other agents should coordinate before editing the same storage
+transaction paths or running an acceptance chain.
+
 ## OpenCode - Stage 1-5 storage gap investigation (2026-11-26)
 
 Inspecting the current bounded storage transaction and recovery boundary as the

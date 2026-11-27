@@ -1,5 +1,19 @@
 # WovenFS-as-system-filesystem migration — tracker and resume map
 
+## Bounded multi-file transaction implementation — 2026-11-27 — VALIDATION IN PROGRESS
+
+The native batch adapter now stages all creates and exact-length replacements
+in a single existing journal transaction instead of committing each path
+independently. The transaction is limited to 32 distinct sectors; a rejected
+batch performs no journal writes. A successful disk commit does not itself
+publish new bytes into existing VFS cache entries, and a device error after the
+commit point requires recovery before the outcome is known.
+
+Host crash-boundary tests pass for a batch containing an existing file and
+multiple new files, including validation and capacity rejection. The installed
+adapter and full inherited acceptance are being requalified; this entry is not
+a stage-closure or physical durability claim.
+
 ## Installed crash-boundary matrix expanded — 2026-11-25
 
 The installed-image gate now exercises descriptor staging, staged payload,

@@ -103,9 +103,12 @@ class InstalledDiskQemuContracts(unittest.TestCase):
             "[INSTALLED WOVENFS] reboot phase cleanup: PASSED",
         )
         for expected in phases:
-            serial = f"{expected}\n"
+            serial = f"[INSTALLED WOVENFS] atomic batch: PASSED\n{expected}\n"
             self.assertTrue(
                 MODULE.wovenfs_qualification_status(serial, "wovenfs", expected)["passed"]
+            )
+            self.assertFalse(
+                MODULE.wovenfs_qualification_status(expected, "wovenfs", expected)["passed"]
             )
             for other in phases:
                 if other != expected:
@@ -116,11 +119,12 @@ class InstalledDiskQemuContracts(unittest.TestCase):
     def test_interruption_marker_is_distinct_from_normal_write(self):
         interrupted = "[INSTALLED WOVENFS] journal commit interruption: PASSED"
         normal = "[INSTALLED WOVENFS] reboot phase write: PASSED"
+        batch = "[INSTALLED WOVENFS] atomic batch: PASSED\n"
         self.assertTrue(
-            MODULE.wovenfs_qualification_status(interrupted, "wovenfs", interrupted)["passed"]
+            MODULE.wovenfs_qualification_status(batch + interrupted, "wovenfs", interrupted)["passed"]
         )
         self.assertFalse(
-            MODULE.wovenfs_qualification_status(normal, "wovenfs", interrupted)["passed"]
+            MODULE.wovenfs_qualification_status(batch + normal, "wovenfs", interrupted)["passed"]
         )
 
     def test_interruption_mode_requires_wovenfs(self):
