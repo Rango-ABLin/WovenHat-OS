@@ -443,6 +443,11 @@ impl Shell {
                     cmd_sync(console);
                 }
             }
+            "snapshot" => {
+                if authorize(Capability::FileWrite, console) {
+                    cmd_snapshot(arg, console);
+                }
+            }
             _ => {
                 if !cmd_userland_command(verb, arg, console) {
                     console.print("unknown command: ");
@@ -491,7 +496,7 @@ fn print_help(console: &mut Console) {
     );
     console.println("files:   ls [path]  cat <path>  write <path> <text>");
     console.println("         mkdir <path>  rm <path>  stat <path>");
-    console.println("         rename|mv <old> <new>");
+    console.println("         rename|mv <old> <new>  snapshot create|restore <id>");
     console.println("test:    mmaptest (private/shared mappings, fork, msync), msynctest (disk)");
     console.println("nav:     cd [path]  pwd  echo <text>");
     console.println("live:    note <text> (kept in the USB stick's log)  savelog");
