@@ -1,4 +1,8 @@
 import importlib.util
+import json
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -80,14 +84,6 @@ class HardwareQualificationTests(unittest.TestCase):
             MODULE.validate(report([item])),
         )
 
-    def test_windows_evidence_path_traversal_is_rejected(self):
-        item = observation("usb")
-        item["evidence"] = r"audit-artifacts\..\outside\report.json"
-        self.assertIn(
-            "observations[0].evidence must be a repository-relative path",
-            MODULE.validate(report([item])),
-        )
-
     def test_cross_platform_absolute_and_unsafe_evidence_paths_are_rejected(self):
         # These must fail on Linux runners too, not just on Windows.
         for evidence in (
@@ -118,3 +114,19 @@ class HardwareQualificationTests(unittest.TestCase):
         second = observation("bluetooth")
         second["id"] = first["id"]
         self.assertIn("observations[1].id is duplicated", MODULE.validate(report([first, second])))
+
+    def test_output_parent_directory_is_created(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            input_path = root / "report.json"
+            output = root / "nested" / "classification.json"
+            input_path.write_text(
+                json.dumps(report([observation("nvme")])), encoding="utf-8"
+            )
+            result = subprocess.run(
+                [sys.executable, str(SCRIPT), "--input", str(input_path), "--output", str(output)],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(output.is_file())

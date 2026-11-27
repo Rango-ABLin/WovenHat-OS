@@ -25,11 +25,16 @@ extern crate std;
 
 #[cfg(all(feature = "userspace-allocator", target_os = "none"))]
 mod userspace_allocator {
+    #[cfg(not(feature = "reclaiming-allocator"))]
     use core::alloc::{GlobalAlloc, Layout};
+    #[cfg(not(feature = "reclaiming-allocator"))]
     use core::sync::atomic::{AtomicU64, Ordering};
 
+    #[cfg(not(feature = "reclaiming-allocator"))]
     const ARENA_BYTES: u64 = 64 * 1024;
+    #[cfg(not(feature = "reclaiming-allocator"))]
     static NEXT: AtomicU64 = AtomicU64::new(0);
+    #[cfg(not(feature = "reclaiming-allocator"))]
     static END: AtomicU64 = AtomicU64::new(0);
 
     #[cfg(any(test, feature = "reclaiming-allocator"))]
@@ -39,8 +44,10 @@ mod userspace_allocator {
     #[path = "../heap_allocator.rs"]
     pub(crate) mod heap_allocator;
 
+    #[cfg(not(feature = "reclaiming-allocator"))]
     struct Arena;
 
+    #[cfg(not(feature = "reclaiming-allocator"))]
     unsafe impl GlobalAlloc for Arena {
         unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
             if layout.size() == 0 {
@@ -105,6 +112,7 @@ mod userspace_allocator {
         unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {}
     }
 
+    #[cfg(not(feature = "reclaiming-allocator"))]
     #[global_allocator]
     static ALLOCATOR: Arena = Arena;
 }
@@ -15019,6 +15027,10 @@ pub enum Key {
     Enter,
     Backspace,
     Tab,
+    /// Alt+Tab: cycle to the next window in shell stacking order.
+    WindowNext,
+    /// Shift+Alt+Tab: cycle to the previous window.
+    WindowPrevious,
     Escape,
     F1,
     F2,
@@ -15122,6 +15134,8 @@ fn decode_event(result: u64) -> Result<Option<InputEvent>, Error> {
         2 => InputEvent::Key(Key::Enter),
         3 => InputEvent::Key(Key::Backspace),
         4 => InputEvent::Key(Key::Tab),
+        17 => InputEvent::Key(Key::WindowNext),
+        18 => InputEvent::Key(Key::WindowPrevious),
         16 => InputEvent::Key(Key::Escape),
         5 => InputEvent::Key(Key::F1),
         8 => InputEvent::Key(Key::F2),

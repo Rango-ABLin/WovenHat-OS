@@ -1,3 +1,17 @@
+## OpenCode - WovenWeb global allocator repair (2026-11-27) - ACTIVE (CI REPAIR)
+
+CI run `46028455258` exposed a real latent defect after the missing WovenWeb
+module declarations were restored: the memory fixture exits 68 because its
+standard `Vec` reservation cannot fit the fixed 64 KiB `Arena`. A merge had
+replaced the opt-in `RuntimeHeap` global allocator with the legacy arena while
+leaving the explicit runtime allocator in place. This pass restores the
+`RuntimeHeap` as global allocator for `reclaiming-allocator` native guests and
+keeps the legacy arena for non-reclaiming guests. No assertion, timeout or
+fixture allocation is being reduced. Please do not start another QEMU
+acceptance chain until the serialized WovenWeb 1/2/4-CPU validation below is
+recorded. QEMU chain ownership has been released after the 1/2/4-CPU WovenWeb memory
+validation passed.
+
 ## OpenCode - WovenInit boot-path repair and image smoke (2026-11-27) - DONE (BOUNDED)
 
 Normal boot had stopped calling `woven_init::start()`, so the strict WovenInit
@@ -12070,3 +12084,35 @@ deleted; its archive tag remains. The next candidate,
 `.github/workflows/kernel.yml`; the merge was aborted and the branch was
 restored exactly from its archive tag. No content was lost and it remains in
 the review queue.
+## Codex - secure RNG boot panic repair (2026-11-27) - DONE (FOCUSED)
+
+Repairing the owner-reported boot panic in `kernel/src/secure_rng.rs`: the
+health-checked eight-sample RDRAND path copies 64 bytes into a mistakenly
+32-byte staging buffer. Scope is limited to the secure RNG implementation and
+focused validation; entropy requirements, syscall ABI and acceptance assertions
+remain unchanged. No QEMU acceptance chain will start while another chain is
+reserved above.
+
+Result: the staging buffer now holds all 64 bytes from the eight accepted
+RDRAND samples before the existing HMAC derivation. `cargo fmt --all --
+--check`, warning-denying `secure-rng-test` kernel Clippy, and warning-denying
+all-target Clippy pass. QEMU and the full Stage 10.7 chain were not run because
+another owner's serialized acceptance chain is active; no full gate is claimed.
+## Codex - Alt+Tab bounded window switching (2026-11-27) - DONE (FOCUSED)
+
+Implementing the user-requested software gap: semantic Alt+Tab and
+Shift+Alt+Tab key events from both PS/2 and USB HID decoders, versioned through
+the existing packed input ABI, with bounded current-workspace focus cycling in
+WovenShell. Scope: `kernel/src/{keyboard,woven_input,xhci,syscall}.rs`,
+`libwoven/src/lib.rs`, focused shell logic/tests, and status/architecture docs.
+The existing shell P0 timing diagnostics and WovenInit changes are concurrent
+work and will be preserved. No QEMU chain will start while the serialized
+WovenInit/desktop work above remains active.
+
+Result: PS/2 and USB HID produce additive semantic events without changing
+plain Tab; WovenShell switches only among visible windows in the current
+workspace. Three pure selection tests, the workspace suite, formatting,
+warning-denying default/Stage 13.7/Stage 13.13 kernel Clippy, freestanding
+shell Clippy, and all-target Clippy pass. Real-QEMU and full Stage 10.7 remain
+open because the P0 desktop owner immediately resumed the serialized chain;
+no full acceptance or physical-keyboard claim is made.

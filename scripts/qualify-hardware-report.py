@@ -151,6 +151,7 @@ def main() -> int:
         code = 0
     encoded = json.dumps(result, indent=2, sort_keys=True) + "\n"
     if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(encoded, encoding="utf-8")
     print(encoded, end="")
     return code

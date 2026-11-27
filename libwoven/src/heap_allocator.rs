@@ -366,5 +366,10 @@ mod tests {
     }
 }
 
+// The opt-in runtime heap is the crate's global allocator for native
+// WovenWeb guests. Standard Rust collections must use the same reclaiming
+// allocator as the explicit runtime-allocation checks; a fixed 64 KiB arena
+// cannot satisfy a Vec reservation that spans adjacent regions.
 #[cfg(all(feature = "reclaiming-allocator", target_os = "none"))]
+#[global_allocator]
 pub(crate) static USER_HEAP: RuntimeHeap<NativeVm> = RuntimeHeap::new(NativeVm);
