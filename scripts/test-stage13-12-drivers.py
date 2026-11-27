@@ -76,6 +76,10 @@ def main():
         parser.error('QEMU and firmware files must exist')
     out = root / 'audit-artifacts' / f'stage13.12-{args.mode}-{args.cpus}cpu-{time.time_ns()}'
     out.mkdir(parents=True)
+    vars_copy = None
+    if args.firmware_vars is not None:
+        vars_copy = out / 'OVMF_VARS.fd'
+        shutil.copyfile(args.firmware_vars, vars_copy)
     production = args.mode == 'production'
     build_command = ['cargo', 'run', '--quiet']
     if args.mode == 'restart':
@@ -95,6 +99,8 @@ def main():
                *firmware_drive_args(firmware, args.firmware_vars, out),
                '-drive', f'if=none,id=boot,format=raw,readonly=on,file={build.stdout.strip()}',
                '-device', 'virtio-blk-pci,drive=boot,bootindex=1']
+    if vars_copy is not None:
+        command += ['-drive', f'if=pflash,unit=1,format=raw,file={vars_copy}']
     if args.mode in ('devices', 'production', 'restart'):
         for name in ('nvme', 'sata'):
             with (out / f'{name}.img').open('wb') as image:
