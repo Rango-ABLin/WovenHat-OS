@@ -622,6 +622,18 @@ def main(argv: list[str] | None = None) -> int:
                 serial, "woven-shell: window maximized: Terminal", 1, step + args.input_timeout,
                 process, "maximize_on_ms", timings, step,
             )
+            # The maximize WSIZ must reach the client and come back as WRSZ.
+            # Terminal clamps to its bounded 480x320 canvas, so the shell keeps
+            # the band-filling frame and logs the clamp: a frame-only maximize
+            # with no client reflow cannot produce these markers.
+            wait_marker_count(
+                serial, "WovenTerminal: window resized", 1, step + args.input_timeout,
+                process, "maximize_client_reflow_ms", timings, step,
+            )
+            wait_marker_count(
+                serial, "woven-shell: window resized (maximized, clamped): Terminal", 1,
+                step + args.input_timeout, process, "maximize_wrsz_ms", timings, step,
+            )
             maximized = output / "maximize-step12-maximized.ppm"
             _, _, maximized_frame = dq.capture_until_changed(
                 qmp, maximized, terminal_frame,
@@ -641,6 +653,17 @@ def main(argv: list[str] | None = None) -> int:
             wait_marker_count(
                 serial, "woven-shell: window restored: Terminal", 1, step + args.input_timeout,
                 process, "maximize_off_ms", timings, step,
+            )
+            # The restore WSIZ must also round-trip: the client resizes back to
+            # its saved canvas and the shell accepts that WRSZ as a normal
+            # resize, ending maximization with the saved geometry.
+            wait_marker_count(
+                serial, "WovenTerminal: window resized", 2, step + args.input_timeout,
+                process, "restore_client_reflow_ms", timings, step,
+            )
+            wait_marker_count(
+                serial, "woven-shell: window resized: Terminal", 1, step + args.input_timeout,
+                process, "restore_wrsz_ms", timings, step,
             )
             restored = output / "maximize-step13-restored.ppm"
             _, _, restored_frame = dq.capture_until_changed(

@@ -1,5 +1,21 @@
 # Stage status
 
+## Audited filesystem, release and desktop gaps - 2026-11-27 - ACCEPTED (BOUNDED)
+
+Closed the actionable current-head gaps: FAT32 mounting now proves that its
+FAT can address every declared data cluster; WovenFS multi-path persistence
+rejects duplicate paths and rolls back earlier native writes after a later
+failure. Release packaging binds the exact complete validator gate set and
+boots the exact packaged ISO in QEMU before publication. Windows release
+acceptance runs on push/PR, and the local release launcher performs the real
+qualification/package path unless explicitly opted out. WovenShell reflows a
+client surface on maximize/restore after clipped shadow rendering; the taskbar
+layout harness covers all six alignment/icon-size combinations.
+
+FAT32/page-cache tests, affected feature Clippy, shell Clippy, all-target
+Clippy, release boundary tests, and the full serialized Stage 10.7 chain pass.
+Physical/hardware/trust prerequisites remain separate external gates.
+
 ## Window shadow compositor stall diagnosed and bounded - 2026-11-27 - ACCEPTED (BOUNDED 1-CPU SOFTWARE/QEMU)
 
 The stall that forced frame-only maximize in `32c14dbe` was diagnosed as a

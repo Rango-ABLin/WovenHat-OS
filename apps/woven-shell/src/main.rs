@@ -4364,7 +4364,12 @@ impl Desktop {
             request[4..6].copy_from_slice(&(next_w as u16).to_le_bytes());
             request[6..].copy_from_slice(&(next_h as u16).to_le_bytes());
             window.resizing_until = libwoven::ticks() + RESIZE_GRACE;
-            let _ = libwoven::message_send(window.owner, &request);
+            if libwoven::message_send(window.owner, &request).is_err() {
+                log(&[
+                    b"woven-shell: WSIZ send failed: ",
+                    &window.title[..window.title_length],
+                ]);
+            }
         }
         if next_maximized {
             log(&[
