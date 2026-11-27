@@ -6907,7 +6907,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             }
         }
     }
-    #[cfg(feature = "qemu-test")]
+    #[cfg(all(feature = "qemu-test", not(feature = "hardware-demo")))]
     qemu_test_exit_success();
 
     loop {
