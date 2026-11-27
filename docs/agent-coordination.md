@@ -22,8 +22,10 @@ used because the host had only ~3.9 GiB free virtual memory and QEMU could not
 reserve the harness default 5G; no assertion, budget or timeout changed. 2/4
 CPU reruns are BLOCKED by another owner's in-progress kernel WIP
 (`vfs.rs`/`storage.rs`/`fat32.rs`), which currently does not compile; this is
-not a regression from this change. WSIZ reflow is deferred until those gates
-can run.
+not a regression from this change. Once that WIP compiled, the same gate
+PASSED at 2/4 CPUs too (`shadow-clip-pins-{2,4}cpu-3G-r2`, zero failures,
+maximize markers present), so the blend path is proven non-blocking at 1/2/4.
+WSIZ reflow remains a separate deferred change.
 
 ## Copilot - native compositor/USB 16-CPU closure (2026-11-27) - DONE
 

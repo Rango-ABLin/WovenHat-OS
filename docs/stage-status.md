@@ -30,11 +30,17 @@ repaint tick counts (max 503) under
 `D:\WovenHat-OS-output\audit-artifacts\shadow-clip-pins-1cpu-3G`. The lower
 guest RAM setting was forced by host free virtual memory (~3.9 GiB) being
 below the harness default 5G QEMU reservation; no assertion, timeout or
-budget was changed. 2/4-CPU and desktop-qualification reruns were not
-completed: another owner's in-progress kernel edits
-(`vfs.rs`/`storage.rs`/`fat32.rs`) currently break the kernel build, and I did
-not touch them. WSIZ client reflow on maximize therefore remains deferred
-until those gates can run; no full `RUN-STAGE10.7.ps1` chain is claimed here.
+budget was changed. The same gate then PASSED at 2 and 4 CPUs with zero
+failures and the maximize markers present
+(`D:\WovenHat-OS-output\audit-artifacts\shadow-clip-pins-{2,4}cpu-3G-r2`), after
+another owner's in-progress kernel edits (`vfs.rs`/`storage.rs`/`fat32.rs`)
+stopped breaking the build; I did not touch those files. Two earlier 2/4-CPU
+attempts during that WIP build break are preserved as
+`shadow-clip-pins-{2,4}cpu-3G`. This proves the compositor blend path is
+non-blocking for maximize with shadows on at 1/2/4 CPUs, but does not yet
+claim WSIZ client reflow on maximize: that client-resize path is a separate
+change and remains deferred. Desktop qualification and the full
+`RUN-STAGE10.7.ps1` chain were not rerun here and are not claimed.
 
 ## Stage 1-19 current-head software gate closure - 2026-11-27 - VERIFIED (EXTERNAL GATES OPEN)
 
