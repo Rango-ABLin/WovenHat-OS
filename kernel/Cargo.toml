@@ -387,7 +387,13 @@ stage24-3-test = ["qemu-test"]
 stage24-4-test = ["qemu-test"]
 stage24-5-test = ["qemu-test"]
 stage1-5-test = ["qemu-test"]
+stage1-5-ata-flush-test = ["qemu-test"]
 stage7-test = ["qemu-test"]
+stage12-4-reboot-test = ["qemu-test"]
+wovenweb-vm-test = ["qemu-test"]
+wovenweb-cxx-test = ["qemu-test"]
+wovenweb-memory-test = ["qemu-test"]
+wovenweb-net-test = ["qemu-test"]
 
 [dependencies]
 libwoven = { path = "../libwoven", default-features = false }
