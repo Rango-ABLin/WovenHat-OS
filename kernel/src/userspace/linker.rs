@@ -1285,6 +1285,10 @@ pub(super) fn load_with_geometry(
         }
     }
     map_linked_segments(&mut pending, &images, stack.guard_base, mmap_base)?;
+    // The trampoline lives in the main executable's low-address arena.
+    // Shared libraries occupy the separate LIBRARY_START region; including
+    // their high addresses here would incorrectly push the trampoline past
+    // the mmap arena and reject every valid dependency graph.
     let mut image_end = LIFECYCLE_TRAMPOLINE;
     // The trampoline shares the main executable's low-address arena. Shared
     // libraries occupy a separate arena and cannot raise its placement floor.

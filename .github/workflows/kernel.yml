@@ -1056,6 +1056,18 @@ jobs:
           cargo fetch --locked --manifest-path "$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
+      # Acceptance builds are offline by policy, but hosted runners start
+      # without the required crates.io index and crate archives.
+      - name: Prefetch locked desktop dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo --config net.offline=false fetch --locked
+          # Standalone app lockfiles currently require refresh. Do not alter
+          # tracked lockfiles: the CI runner resolves them only for this job.
+          (cd apps/hello && cargo --config net.offline=false fetch)
+          (cd apps/hello-gui && cargo --config net.offline=false fetch)
+          (cd apps/woven-files && cargo --config net.offline=false fetch)
       - name: Stage 16.1 out-of-kernel application 1/2/4-core acceptance
         shell: bash
         run: |
