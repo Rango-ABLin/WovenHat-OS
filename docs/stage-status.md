@@ -13770,28 +13770,6 @@ cycles, duplicate references, malformed names, and orphaned live inodes.
 Mounted-system policy remains open. See the [Stage 15
 VFS write-through audit](docs/audit-stages-consolidated.md).
 
-Revalidation 2026-10-15 at `4e9e236` (after the WovenFS hardening series in
-`docs/AUTONOMOUS_PROGRESS.md`): Stage 15.1 and Stage 15.2 (scratch image) both
-passed QEMU on 1/2/4 CPUs with exit 33 through `scripts/test-wovenfs-qemu.ps1`,
-a PowerShell port of the Python harnesses for hosts without Python. Physical
-USB qualification was not rerun.
-
-2026-10-16: write and unlink refuse blocks that another live inode also names
-(cross-inode aliasing). The refusal happens on these paths, not only in
-`check()`. See `docs/AUTONOMOUS_PROGRESS.md` for the gate results.
-
-2026-10-16: create and unlink also refuse to rewrite a directory block that a
-file inode names or that the bitmap marks free. See
-`docs/AUTONOMOUS_PROGRESS.md` for the gate results.
-
-2026-10-16: unlink refuses a file inode whose `links` is not 1, and `check()`
-flags one. Hard links do not exist yet, so any other count is corruption.
-See `docs/AUTONOMOUS_PROGRESS.md` for the gate results.
-
-2026-10-16: create refuses to allocate a free inode that a directory entry
-still names, so a stale entry cannot become a second name for a new file.
-See `docs/AUTONOMOUS_PROGRESS.md` for the gate results.
-
 Crash recovery is proven by fault injection, not actual power loss on a device.
 Physical qualification remains incomplete: the inserted USB flash disk was
 inspected read-only, while the destructive harness requires Administrator

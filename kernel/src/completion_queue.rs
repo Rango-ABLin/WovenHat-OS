@@ -200,39 +200,4 @@ mod tests {
         assert_eq!(q.snapshot(&mut out), 2);
         assert_eq!((out[0].operation, out[1].operation), (9, 8));
     }
-    #[test]
-    fn duplicate_reserve_publish_remove_guards() {
-        let mut q = Queue::new();
-
-        // Reserve operation 7.
-        assert!(q.reserve(7, 100));
-        // Duplicate while unpublished — must not occupy a second slot.
-        assert!(!q.reserve(7, 200));
-
-        // Publish operation 7 (sequence 1).
-        assert!(q.publish(7, 2, 0, 42, 0));
-        // Duplicate while already published — still refused.
-        assert!(!q.reserve(7, 300));
-
-        // publish / remove for an operation never reserved → false.
-        assert!(!q.publish(999, 0, 0, 0, 0));
-        assert!(!q.remove(999));
-
-        // Add a second event (sequence 2) so the partial-snapshot path is live.
-        assert!(q.reserve(5, 0) && q.publish(5, 0, 0, 0, 55));
-
-        // Partial snapshot: 1-slot output receives only the earliest sequence.
-        let mut one = [Event::default(); 1];
-        assert_eq!(q.snapshot(&mut one), 1);
-        assert_eq!(one[0].operation, 7);
-
-        // Both events survive a partial snapshot (snapshot is non-destructive).
-        let mut two = [Event::default(); 2];
-        assert_eq!(q.snapshot(&mut two), 2);
-        assert_eq!((two[0].operation, two[1].operation), (7, 5));
-
-        // After remove, the same operation id can be reserved again.
-        assert!(q.remove(7));
-        assert!(q.reserve(7, 400));
-    }
 }

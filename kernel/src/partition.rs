@@ -4,14 +4,14 @@ const PARTITION_TABLE_OFFSET: usize = 446;
 const PARTITION_ENTRY_SIZE: usize = 16;
 const PARTITION_COUNT: usize = 4;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Partition {
     pub start_lba: u64,
     pub sectors: u64,
     pub kind: u8,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Error {
     Block(BlockError),
     InvalidTable,
