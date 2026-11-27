@@ -419,10 +419,10 @@ impl TcpStream {
                 )
             };
             if result == syscall::WOULD_BLOCK {
-                if let Some(limit) = timeout {
-                    if crate::ticks().wrapping_sub(start) >= limit {
-                        return Err(Error::TimedOut);
-                    }
+                if let Some(limit) = timeout
+                    && crate::ticks().wrapping_sub(start) >= limit
+                {
+                    return Err(Error::TimedOut);
                 }
                 crate::yield_now();
                 continue;
