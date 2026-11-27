@@ -6,7 +6,7 @@ param(
     # Both VirtIO-GPU modes use one virtio-vga device. It supplies the
     # UEFI/GOP framebuffer and the kernel's compositor::attach_gpu_outputs()
     # transport together, so no stale secondary VGA display exists.
-    [ValidateSet('std', 'virtio-gpu', 'virtio-gpu-only')][string]$Display = 'virtio-gpu-only',
+    [ValidateSet('std', 'virtio-gpu', 'virtio-gpu-only')][string]$Display = 'std',
     [string]$Qemu = 'C:\Program Files\qemu\qemu-system-x86_64.exe'
 )
 $ErrorActionPreference = 'Stop'
