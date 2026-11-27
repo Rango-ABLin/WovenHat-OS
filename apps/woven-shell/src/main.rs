@@ -954,7 +954,11 @@ impl Desktop {
         // Production presentation is 3D by default. The 3D path still calls
         // the bounded 2D painters to populate textures before projecting
         // them through the software depth-tested renderer.
-        three_d: true,
+        // Start in the stable flat compositor path. 3D projection remains
+        // available through Quick Settings, but must not be the default for
+        // interactive desktop sessions where crisp text and window edges are
+        // the primary contract.
+        three_d: false,
         reduced_motion: false,
         locked: false,
         pin: None,
