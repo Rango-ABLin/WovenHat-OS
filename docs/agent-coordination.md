@@ -1,3 +1,17 @@
+## Copilot - remote branch reconciliation (2026-11-27)
+
+Reconciled the requested remote feature, fix, integration, security and stage
+families against master. Removed 60 branches whose tips were already ancestors
+of master and were not used by an open pull request; exact-tip leases and one
+atomic push guarded the deletion. Three additional branches were integrated
+using tree-identical merge commits, pushed, and deleted after verifying their
+PRs had closed. Other branches remain: two already-merged branches support
+open PRs, and 35 have divergent content requiring individual review. Some
+conflict and some apparently clean merges introduce obsolete docs, duplicate
+firmware options or unqualified code; do not merge these blindly. Existing
+storage acceptance remains incomplete. This reservation is released; no
+physical media was involved.
+
 ## Copilot - Stage 1-5 storage recovery investigation (2026-11-27)
 
 Resuming the earliest open WovenFS multi-file transaction and recovery
