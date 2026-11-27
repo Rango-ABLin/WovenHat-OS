@@ -1,0 +1,251 @@
+name: WovenPDF validation
+on:
+  pull_request:
+    paths:
+      - "apps/woven-pdf/**"
+      - ".github/workflows/wovenpdf-host.yml"
+      - "scripts/test-wovenpdf-package.py"
+      - "scripts/test-wovenpdf-qemu.py"
+      - "scripts/test-wovenpdf-desktop-qemu.py"
+  workflow_dispatch:
+
+concurrency:
+  group: wovenpdf-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  parser:
+    name: Host unit tests and Clippy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install pinned nightly Clippy
+        run: rustup component add --toolchain nightly-2026-07-10 clippy
+      - name: Parser unit tests
+        run: cargo +nightly-2026-07-10 test --manifest-path apps/woven-pdf/Cargo.toml --target x86_64-unknown-linux-gnu --lib
+      - name: Deny compiler warnings
+        run: cargo +nightly-2026-07-10 clippy --manifest-path apps/woven-pdf/Cargo.toml --target x86_64-unknown-linux-gnu --lib -- -D warnings
+
+  freestanding:
+    name: Freestanding GUI build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly Rust target and source
+        run: |
+          rustup toolchain install nightly-2026-07-10 --component rust-src --target x86_64-unknown-none
+      - name: Compile native WovenPDF binary
+        run: cargo +nightly-2026-07-10 build --manifest-path apps/woven-pdf/Cargo.toml --target x86_64-unknown-none --bin wovenhat-pdf
+      - name: Publish freestanding viewer executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: wovenpdf-native-elf
+          path: apps/woven-pdf/target/x86_64-unknown-none/debug/wovenhat-pdf
+          if-no-files-found: error
+
+  packaging:
+    name: Experimental WAPP package verification
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Rust toolchain for Ring-3 packaging
+        run: rustup toolchain install nightly-2026-07-10 --component rust-src --target x86_64-unknown-none
+      - name: Validate WovenPDF Python harness syntax
+        run: python3 -m py_compile scripts/test-wovenpdf-package.py scripts/test-wovenpdf-qemu.py scripts/test-wovenpdf-desktop-qemu.py
+      - name: Build and verify WovenPDF WAPP package
+        env:
+          RUSTUP_TOOLCHAIN: nightly-2026-07-10
+        run: python3 scripts/test-wovenpdf-package.py
+      - name: Publish experimental WAPP
+        uses: actions/upload-artifact@v4
+        with:
+          name: wovenpdf-experimental-wapp
+          path: apps/woven-pdf/target/x86_64-unknown-none/release/wovenhat-pdf.wapp
+          if-no-files-found: error
+
+  formatting:
+    name: Rust formatting
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+      - name: Install pinned rustfmt
+        run: rustup toolchain install nightly-2026-07-10 --component rustfmt
+      - name: Format source for review
+        run: |
+          cargo +nightly-2026-07-10 fmt --manifest-path apps/woven-pdf/Cargo.toml --all
+          git diff --binary -- apps/woven-pdf > wovenpdf-rustfmt.patch
+      - name: Upload exact formatting patch
+        uses: actions/upload-artifact@v4
+        with:
+          name: wovenpdf-rustfmt-patch
+          path: wovenpdf-rustfmt.patch
+          if-no-files-found: error
+      - name: Commit formatter corrections to WovenPDF branch
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'feature/wovenpdf-native-reader-20261025'
+        env:
+          BRANCH: ${{ github.head_ref }}
+        run: |
+          if ! git diff --quiet -- apps/woven-pdf; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add apps/woven-pdf
+            git commit -m "style(wovenpdf): apply pinned rustfmt"
+            git push origin HEAD:"$BRANCH"
+          fi
+      - name: Check WovenPDF formatting only
+        run: |
+          cargo +nightly-2026-07-10 fmt --manifest-path apps/woven-pdf/Cargo.toml --all
+          git diff --exit-code -- apps/woven-pdf
+
+  ring3:
+    name: WovenPDF Ring-3 QEMU execution (${{ matrix.cpus }} CPU)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        cpus: [1, 2, 4]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-10
+          targets: x86_64-unknown-none,x86_64-unknown-uefi
+          components: rust-src,llvm-tools-preview
+      - name: Install QEMU and OVMF
+        run: |
+          set -euo pipefail
+          # The hosted image can contain an unrelated Microsoft apt source
+          # that returns HTTP 403. Disable only that source for this job.
+          for source in /etc/apt/sources.list.d/*; do
+            [ -f "$source" ] || continue
+            if grep -q 'packages.microsoft.com/ubuntu/24.04/prod' "$source"; then
+              sudo sed -i '/packages\.microsoft\.com\/ubuntu\/24\.04\/prod/s/^/# disabled for WovenPDF QEMU setup: /' "$source"
+            fi
+          done
+          sudo apt-get update
+          sudo apt-get install --yes qemu-system-x86 ovmf
+      - name: Execute WovenPDF WAPP in Ring 3
+        env:
+          RUSTUP_TOOLCHAIN: nightly-2026-07-10
+        run: |
+          set -euo pipefail
+          ovmf=
+          for file in /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/OVMF/OVMF_CODE.fd; do
+            if [ -f "$file" ]; then ovmf="$file"; break; fi
+          done
+          test -n "$ovmf"
+          python3 scripts/test-wovenpdf-qemu.py --cpus ${{ matrix.cpus }} --timeout 240 \
+            --qemu /usr/bin/qemu-system-x86_64 --firmware "$ovmf"
+      - name: Preserve QEMU evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wovenpdf-ring3-${{ matrix.cpus }}cpu-evidence
+          if-no-files-found: ignore
+          path: audit-artifacts/wovenpdf-ring3-smoke-${{ matrix.cpus }}cpu/
+
+  gui-loader:
+    name: Full GUI ELF Ring-3 loader (1 CPU)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-10
+          targets: x86_64-unknown-none,x86_64-unknown-uefi
+          components: rust-src,llvm-tools-preview
+      - name: Install QEMU and OVMF
+        run: |
+          set -euo pipefail
+          # The hosted image can contain an unrelated Microsoft apt source
+          # that returns HTTP 403. Disable only that source for this job.
+          for source in /etc/apt/sources.list.d/*; do
+            [ -f "$source" ] || continue
+            if grep -q 'packages.microsoft.com/ubuntu/24.04/prod' "$source"; then
+              sudo sed -i '/packages\.microsoft\.com\/ubuntu\/24\.04\/prod/s/^/# disabled for WovenPDF QEMU setup: /' "$source"
+            fi
+          done
+          sudo apt-get update
+          sudo apt-get install --yes qemu-system-x86 ovmf
+      - name: Load entire graphical WovenPDF executable as signed Ring-3 process
+        env:
+          RUSTUP_TOOLCHAIN: nightly-2026-07-10
+        run: |
+          set -euo pipefail
+          ovmf=
+          for file in /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/OVMF/OVMF_CODE.fd; do
+            if [ -f "$file" ]; then ovmf="$file"; break; fi
+          done
+          test -n "$ovmf"
+          python3 scripts/test-wovenpdf-qemu.py --cpus 1 --full-gui-image --timeout 240 \
+            --qemu /usr/bin/qemu-system-x86_64 --firmware "$ovmf"
+      - name: Preserve graphical ELF load evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wovenpdf-full-gui-loader-evidence
+          if-no-files-found: ignore
+          path: audit-artifacts/wovenpdf-ring3-full-gui-1cpu/
+
+  desktop-probe:
+    name: Experimental WovenShell WovenPDF window probe (1 CPU)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-10
+          targets: x86_64-unknown-none,x86_64-unknown-uefi
+          components: rust-src,llvm-tools-preview
+      - name: Install QEMU and OVMF
+        run: |
+          set -euo pipefail
+          # The hosted image can contain an unrelated Microsoft apt source
+          # that returns HTTP 403. Disable only that source for this job.
+          for source in /etc/apt/sources.list.d/*; do
+            [ -f "$source" ] || continue
+            if grep -q 'packages.microsoft.com/ubuntu/24.04/prod' "$source"; then
+              sudo sed -i '/packages\.microsoft\.com\/ubuntu\/24\.04\/prod/s/^/# disabled for WovenPDF QEMU setup: /' "$source"
+            fi
+          done
+          sudo apt-get update
+          sudo apt-get install --yes qemu-system-x86 ovmf
+      - name: Probe WovenPDF process and WOPN request inside WovenShell
+        env:
+          RUSTUP_TOOLCHAIN: nightly-2026-07-10
+        run: |
+          set -euo pipefail
+          ovmf=
+          for file in /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/OVMF/OVMF_CODE.fd; do
+            if [ -f "$file" ]; then ovmf="$file"; break; fi
+          done
+          test -n "$ovmf"
+          python3 scripts/test-wovenpdf-desktop-qemu.py --cpus 1 --timeout 240 \
+            --qemu /usr/bin/qemu-system-x86_64 --firmware "$ovmf"
+      - name: Preserve WovenShell probe evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wovenpdf-desktop-probe-evidence
+          if-no-files-found: ignore
+          path: audit-artifacts/wovenpdf-desktop-1cpu/

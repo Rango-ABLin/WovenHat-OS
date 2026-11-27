@@ -240,6 +240,47 @@ fn transaction_preflight_rejects_reserved_bitmap_target_without_writes() {
 }
 
 #[test]
+fn replay_rejects_reserved_journal_targets_without_touching_metadata() {
+    for target_kind in 0..3 {
+        let disk = formatted();
+        let sb = {
+            let volume = Volume::mount(disk.clone()).expect("baseline mount");
+            *volume.super_block()
+        };
+        let target = match target_kind {
+            0 => 0,
+            1 => 1,
+            _ => sb.journal_start,
+        };
+        let original_superblocks = {
+            let image = disk.image.borrow();
+            [image[0], image[1]]
+        };
+        forge_committed_journal(&disk, &[target], true);
+        assert!(
+            matches!(Volume::mount(disk.clone()), Err(Error::Corrupt)),
+            "reserved target {target} must be refused"
+        );
+        let image = disk.image.borrow();
+        assert_eq!([image[0], image[1]], original_superblocks);
+    }
+}
+
+#[test]
+fn replay_rejects_duplicate_destination_before_any_write() {
+    let disk = formatted();
+    let sb = {
+        let volume = Volume::mount(disk.clone()).expect("baseline mount");
+        *volume.super_block()
+    };
+    let destination = sb.data_start;
+    let original = disk.sectors()[destination as usize];
+    forge_committed_journal(&disk, &[destination, destination], true);
+    assert!(matches!(Volume::mount(disk.clone()), Err(Error::Corrupt)));
+    assert_eq!(disk.sectors()[destination as usize], original);
+}
+
+#[test]
 fn format_produces_a_consistent_mountable_volume() {
     let image = formatted();
     let mut volume = mount_consistent(&image, "fresh format");

@@ -40,6 +40,18 @@ SHELL_MARKER = '[BOOT] shell-first runtime ready'
 LINE = re.compile(r'^\[DRIVERS\] (\w+)(?: at ([0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.\d))?: (\w+)', re.M)
 
 
+def firmware_drive_args(firmware, firmware_vars, out):
+    """Use a private writable VARS image; never modify the supplied template."""
+    drives = ['-drive', f'if=pflash,unit=0,format=raw,readonly=on,file={firmware}']
+    if firmware_vars is not None:
+        if not firmware_vars.is_file():
+            raise FileNotFoundError(f'OVMF VARS template does not exist: {firmware_vars}')
+        vars_copy = out / 'OVMF_VARS.fd'
+        shutil.copyfile(firmware_vars, vars_copy)
+        drives.extend(['-drive', f'if=pflash,unit=1,format=raw,file={vars_copy}'])
+    return drives
+
+
 def outcomes(log):
     """The first bring-up's outcome per driver (the gate runs it twice)."""
     seen = {}
@@ -54,16 +66,14 @@ def main():
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4, 8, 16), default=1)
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
     parser.add_argument('--firmware', type=Path)
-    parser.add_argument('--firmware-vars', type=Path,
-                        help='matching writable OVMF VARS template, copied per QEMU run')
+    parser.add_argument('--firmware-vars', type=Path, help='OVMF VARS template, copied for each run')
     parser.add_argument('--timeout', type=float, default=240)
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     qemu = Path(args.qemu)
     firmware = args.firmware or qemu.parent / 'share' / 'edk2-x86_64-code.fd'
-    firmware_vars = args.firmware_vars
-    if not qemu.is_file() or not firmware.is_file() or (firmware_vars is not None and not firmware_vars.is_file()):
-        parser.error('QEMU and firmware files must exist; --firmware-vars must name an existing OVMF VARS template when supplied')
+    if not qemu.is_file() or not firmware.is_file():
+        parser.error('QEMU and firmware files must exist')
     out = root / 'audit-artifacts' / f'stage13.12-{args.mode}-{args.cpus}cpu-{time.time_ns()}'
     out.mkdir(parents=True)
     production = args.mode == 'production'
@@ -77,17 +87,12 @@ def main():
     if build.returncode:
         print(build.stderr, file=sys.stderr)
         return 1
-    vars_copy = None
-    if firmware_vars is not None:
-        vars_copy = out / 'OVMF_VARS.fd'
-        shutil.copyfile(firmware_vars, vars_copy)
     serial = out / 'serial.log'
     machine = 'pc' if args.mode == 'absent' else 'q35'
     command = [str(qemu), '-accel', 'tcg,tb-size=128', '-machine', machine, '-m', '4G', '-smp', str(args.cpus),
                '-display', 'none', '-serial', f'file:{serial}', '-no-reboot',
                '-device', 'isa-debug-exit,iobase=0xf4,iosize=0x04',
-               '-drive', f'if=pflash,format=raw,readonly=on,file={firmware}',
-               *(['-drive', f'if=pflash,unit=1,format=raw,file={vars_copy}'] if vars_copy else []),
+               *firmware_drive_args(firmware, args.firmware_vars, out),
                '-drive', f'if=none,id=boot,format=raw,readonly=on,file={build.stdout.strip()}',
                '-device', 'virtio-blk-pci,drive=boot,bootindex=1']
     if args.mode in ('devices', 'production', 'restart'):

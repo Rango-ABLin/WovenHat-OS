@@ -1,0 +1,124 @@
+name: nine-lane-validation
+# Independent validation lanes; no lane may substitute for full kernel.yml or physical qualification.
+on:
+  push:
+    branches:
+      - ci/nine-lane-production-validation-20261015
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    name: ${{ matrix.lane }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 9
+      matrix:
+        lane:
+          - kernel-lint
+          - host-regressions
+          - smp-hotplug
+          - security-foundation
+          - wovenfs-storage
+          - network-firewall
+          - pcie-drivers
+          - usb-input
+          - release-integration
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-10
+          targets: x86_64-unknown-none,x86_64-unknown-uefi
+          components: clippy,rust-src,llvm-tools-preview
+      - name: Install QEMU and OVMF
+        if: matrix.lane != 'kernel-lint' && matrix.lane != 'host-regressions'
+        run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
+      - name: Run lane acceptance without weakening checks
+        shell: bash
+        env:
+          LANE: ${{ matrix.lane }}
+        run: |
+          set -euo pipefail
+          qemu=/usr/bin/qemu-system-x86_64
+          ovmf_code=
+          ovmf_vars=
+          if [[ "$LANE" != kernel-lint && "$LANE" != host-regressions ]]; then
+            for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+              candidate="/usr/share/OVMF/$variant"
+              pair="/usr/share/OVMF/${variant/CODE/VARS}"
+              if [[ -f "$candidate" && -f "$pair" ]]; then
+                ovmf_code="$candidate"
+                ovmf_vars="$pair"
+                break
+              fi
+            done
+            test -x "$qemu"
+            test -n "$ovmf_code"
+            test -n "$ovmf_vars"
+          fi
+          case "$LANE" in
+            kernel-lint)
+              cargo clippy -p wovenhat-kernel --target x86_64-unknown-none -- -D warnings
+              cargo clippy --all-targets -- -D warnings
+              ;;
+            host-regressions)
+              cargo test
+              python3 -m unittest discover -s tests -p 'test_*.py'
+              ;;
+            smp-hotplug)
+              cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage6-hotplug-test -- -D warnings
+              for cpu in 2 4; do
+                python3 scripts/test-stage6-hotplug.py --cpus "$cpu" --timeout 180 --qemu "$qemu" --firmware "$ovmf_code"
+              done
+              ;;
+            security-foundation)
+              cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage1-5-test -- -D warnings
+              for cpu in 1 2 4; do
+                python3 scripts/test-stage10-runtime.py --stage 1-5 --cpus "$cpu" --timeout 180 --qemu "$qemu" --firmware "$ovmf_code" --firmware-vars "$ovmf_vars"
+              done
+              ;;
+            wovenfs-storage)
+              for cpu in 1 2 4; do
+                python3 scripts/test-wovenfs-device.py --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+              done
+              ;;
+            network-firewall)
+              cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage14-5-test -- -D warnings
+              for cpu in 1 2 4; do
+                python3 scripts/test-network-qemu.py --feature stage14-5-test --cpus "$cpu" --timeout 240 --qemu "$qemu" --firmware "$ovmf_code" --firmware-vars "$ovmf_vars"
+              done
+              ;;
+            pcie-drivers)
+              cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage13-14-test -- -D warnings
+              for cpu in 1 2 4; do
+                python3 scripts/test-stage13-14-storage.py --mode nvme --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+              done
+              ;;
+            usb-input)
+              cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage13-13-test -- -D warnings
+              for cpu in 1 2 4; do
+                python3 scripts/test-stage13-13-usb-input.py --cpus "$cpu" --timeout 240 --qemu "$qemu" --firmware "$ovmf_code"
+              done
+              ;;
+            release-integration)
+              python3 scripts/test-release.py --qemu "$qemu" --firmware "$ovmf_code" --firmware-vars "$ovmf_vars"
+              ;;
+            *)
+              echo "::error::Unrecognized validation lane"
+              exit 2
+              ;;
+          esac
+      - name: Preserve audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nine-lane-${{ matrix.lane }}
+          if-no-files-found: ignore
+          path: |
+            audit-artifacts/
+            target/release-validation/
+            target/*regression-*/serial.log
+            target/*regression-*/qemu.log
