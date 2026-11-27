@@ -1,5 +1,21 @@
 # Stage status
 
+## WovenInit production boot-path repair - 2026-11-27 - ACCEPTED (BOUNDED QEMU)
+
+Normal boot had stopped calling `woven_init::start()`, so the strict
+`[WOVENINIT] essential services ready mask=0xf` barrier was missing from the
+prepared image even though the desktop reached input readiness. Restored the
+feature-gated coordinator module and call; no assertion, timeout, capability or
+harness check was weakened. Warning-denying affected-feature Clippy, all-target
+Clippy, fmt, workspace tests and `libwoven` all-features tests pass. QEMU
+WovenInit rollback and signed-service restart gates pass at 1/2/4 CPUs, and a
+rebuilt disposable image passes a read-only six-marker smoke at 1/2/4 CPUs with
+1280×800 screenshots and QEMU exit 0. The follow-up hardware-demo shell gate
+reached the restored barrier but still failed at the concurrent owner's open P0
+sign-in timing gap, so that gate is not claimed passed. The prepared USB was not
+rewritten and no native hardware category was promoted. Record:
+`docs/audit-woven-init-boot-repair-2026-11-27.md`.
+
 ## Stage 29 Z3 live-test USB preparation - 2026-11-27 - DONE (NO BOOT)
 
 Built the current `master` (`c1d224a5`) `hardware-demo` image with the

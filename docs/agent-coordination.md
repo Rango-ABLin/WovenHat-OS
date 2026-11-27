@@ -1,3 +1,20 @@
+## OpenCode - WovenInit boot-path repair and image smoke (2026-11-27) - DONE (BOUNDED)
+
+Normal boot had stopped calling `woven_init::start()`, so the strict WovenInit
+barrier was missing from the prepared image. Restored the feature-gated module
+declaration and coordinator call in `kernel/src/main.rs`; no shell, identity,
+timeout, assertion or desktop-harness file owned by the concurrent P0 work was
+edited. Serialized validation passed: affected-feature and all-target
+warning-denying Clippy, fmt, workspace/libwoven tests, WovenInit rollback
+1/2/4 CPUs, signed-service restart 1/2/4 CPUs, and a read-only rebuilt-image
+smoke 1/2/4 CPUs with all six markers and 1280×800 screenshots. A follow-up
+hardware-demo shell gate reached the restored barrier but still failed only at
+the owner's open P0 sign-in timing gap; that gate is not claimed passed. The
+USB was not rewritten and no native category was promoted. Evidence:
+`docs/audit-woven-init-boot-repair-2026-11-27.md` and
+`audit-artifacts/z3-woven-init-repair-20261127/validation-summary.json`. QEMU
+chain ownership is released; the P0 owner may resume serialized acceptance.
+
 ## OpenCode - Stage 29 Z3 live-test USB preparation (2026-11-27) - DONE (NO BOOT)
 
 Prepared the already-authorized spare USB for an owner-controlled boot attempt,

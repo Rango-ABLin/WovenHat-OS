@@ -90,7 +90,12 @@ bounded to 500 timer ticks. A spawn, registration, dependency, or readiness
 failure kills every process started by that transaction in reverse order;
 the existing supervisor takes over restart policy only after the barrier.
 WovenShell remains outside this essential-service graph and starts after the
-barrier, preserving the later login/session phase boundary.
+barrier, preserving the later login/session phase boundary. The production boot
+call site is part of the contract: `start_production_system_services()`
+delegates to `woven_init::start()`. A 2026-11-27 regression that bypassed this
+call removed the readiness barrier even though a desktop appeared; the restored
+path and its strict marker are now covered by the read-only image smoke and by
+the rollback/restart gates at 1/2/4 CPUs.
 
 There is already a splash: `kernel/src/console.rs::show_splash_frame`, driven
 by `kernel_main`'s `boot_stage`. Its spinner phase uses timer ticks and its

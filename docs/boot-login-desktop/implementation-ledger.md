@@ -159,6 +159,15 @@ CPUs). The preceding failed run is retained at
 `audit-artifacts/acceptance-20261109-131508-542`; it exposed and led to repair
 of a stale licensed-font host oracle, not a runtime relaxation.
 
+A later boot-path regression removed the production call to
+`woven_init::start()` while leaving the inline service launch in place, so the
+desktop appeared without the strict readiness barrier. On 2026-11-27 the
+feature-gated module declaration and `start_production_system_services()` call
+were restored. Warning-denying affected-feature/all-target Clippy, fmt, host
+tests, WovenInit rollback and supervisor restart at 1/2/4 CPUs, and the rebuilt
+read-only image smoke at 1/2/4 CPUs pass. Record:
+`docs/audit-woven-init-boot-repair-2026-11-27.md`.
+
 ## BLD-D Phase D splash/ownership closure (2026-11-09)
 
 Status: ACCEPTED. Existing splash rendering is preserved; incorrect
