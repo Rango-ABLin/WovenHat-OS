@@ -3153,6 +3153,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                                     halt();
                                 }
                                 #[cfg(feature = "stage14-5-test")]
+                                if network::stage14_5_firewall_self_test() {
+                                    serial::write_line(format_args!(
+                                        "[S14.5] WovenGuard firewall policy: PASSED"
+                                    ));
+                                } else {
+                                    serial::write_line(format_args!(
+                                        "[S14.5] WovenGuard firewall policy: FAILED"
+                                    ));
+                                    halt();
+                                }
+                                #[cfg(feature = "stage14-5-test")]
                                 if firewall_policy::stage14_5a_self_test() {
                                     serial::write_line(format_args!(
                                         "[S14.5A] firewall policy foundation PASSED"

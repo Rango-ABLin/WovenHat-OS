@@ -316,7 +316,7 @@ def main():
         '[SMP] acknowledged TLB shootdowns: PASSED',
         '[BOOT] ALL VALIDATIONS PASSED',
     ]
-    if args.feature in ('stage14-1-test', 'stage14-2-test', 'stage14-3-test', 'stage14-4-test', 'stage14-5-test', 'stage14-5b-test', 'stage14-5c-test', 'stage14-5d-test'):
+    if args.feature in ('stage14-1-test', 'stage14-2-test', 'stage14-3-test', 'stage14-4-test', 'stage14-5-test', 'stage14-5b-test', 'stage14-5c-test', 'stage14-5d-test', 'stage14-6-test'):
         required.extend([
             '[S14.1D] WovenNet DHCP transition/recovery: PASSED',
             '[S14.1S] WovenNet socket/ephemeral stress: PASSED',
