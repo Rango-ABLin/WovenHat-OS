@@ -1306,13 +1306,8 @@ pub(super) fn load_with_geometry(
     let lazy_trampoline_base = lifecycle_trampoline.checked_add(0x100)?;
     let trampoline = UserMapping::new(lifecycle_trampoline, 4096, false, true)?;
     paging::map_user_range_in_inactive(page_table, lifecycle_trampoline, 4096, true, false).ok()?;
-<<<<<<< HEAD
     // Retain ownership before zeroing or writing can fail so Pending reclaims
     // the trampoline along with the other unpublished mappings on rollback.
-=======
-    // Register the mapping immediately: every subsequent fallible operation
-    // must leave a range for Pending::drop to reclaim.
->>>>>>> origin/fix/stage11-loader-rollback-ownership-20261031
     pending.space.mappings[pending.space.mapping_count] = trampoline;
     pending.space.mapping_count += 1;
     paging::zero_user_range_in(page_table, lifecycle_trampoline, 4096).ok()?;
@@ -1339,7 +1334,6 @@ pub(super) fn load_with_geometry(
         0
     };
     paging::map_user_range_in_inactive(page_table, stack_base, stack.size, true, false).ok()?;
-    // Own the stack before zeroing and argv construction can fail.
     pending.stack_mapped = true;
     paging::zero_user_range_in(page_table, stack_base, stack.size).ok()?;
     if !paging::user_range_is_unmapped_in(page_table, stack.guard_base, UserStack::GUARD_SIZE)
