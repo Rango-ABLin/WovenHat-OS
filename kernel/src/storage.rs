@@ -403,6 +403,12 @@ fn mount_device(device: &mut impl crate::block::BlockDevice) -> MountStatus {
     };
 
     let _ = vfs::mkdir("/mnt");
+    // FAT32 has no Unix mode bits. Give the mount point the same world-writable
+    // VFS mode as /tmp so an authorized user task can create entries beneath
+    // it; capability, sandbox file scope and the mounted-path policy still
+    // gate every operation in task/VFS code. Without this the mount is
+    // root-owned 0755 and every user-app mutation fails with ReadOnly.
+    let _ = vfs::set_metadata("/mnt", 0, 0, 0o1777);
 
     let writable_import = !device.is_read_only();
 

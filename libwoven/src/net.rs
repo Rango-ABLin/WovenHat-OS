@@ -95,8 +95,9 @@ pub fn listen(socket: u64, port: u16) -> Result<(), Error> {
 
 /// Wait event-driven for one inbound connection on a listening descriptor and
 /// return the accepted peer. No Ring-3 pointer is retained and no spin loop is
-/// used. After a successful accept the descriptor is connected; another client
-/// requires a new socket in listen state.
+/// used. The descriptor stays a listener: once the accepted peer closes, the
+/// kernel re-arms it so this call can accept the next client. There is no
+/// simultaneous backlog; a second `accept` waits until a client disconnects.
 pub fn accept(socket: u64) -> Result<Endpoint, Error> {
     let handle = check(unsafe { syscall::invoke(syscall::ASYNC_NET_ACCEPT, socket, 0, 0) })?;
     let mut completion = [0u8; 16];

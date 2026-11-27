@@ -8,6 +8,32 @@ formatting, Python release/hardware contracts, settings policy tests, geometry
 contracts, host all-target Clippy and the large-map kernel feature lint. The
 exact merged source then passed `RUN-STAGE10.7.ps1` after also passing
 warning-denying all-target Clippy and the full workspace test suite.
+## OpenCode - sequential multi-client listener (2026-11-27) - DONE
+
+Took the chosen Tier 2 listener item. One listening descriptor now serves
+sequential clients: `network::poll` re-arms it after the accepted peer closes
+(owner `close` is never re-armed), a busy `accept` returns WouldBlock so the
+async worker stays event-driven, and `NET_RECV` distinguishes empty-buffer from
+EOF so a guest can notice the disconnect. The freestanding remote-admin service
+and host mTLS proxy now handle a second connection. Host gate requires two
+clients and two `[LISTEN] accept complete` markers; PASSES 1/2/4/8/16 CPUs with
+one preserved transient 4-CPU timeout and unchanged rerun. Scope:
+`kernel/src/network.rs`, `libwoven/src/net.rs`, `apps/woven-remote-admin`,
+`tools/remote-admin-tls-service`, the host gate and status docs. No new
+syscall, capability or ABI version.
+
+## OpenCode - app mutations on persistent /mnt (2026-11-27) - DONE
+
+Took the Tier 2 `/mnt` provisioning item. Guest TLS was evaluated first and is
+blocked offline: no cached `aes-gcm`/`chacha20` crate exists to build a pure-
+Rust TLS 1.3 AEAD provider, and `ring` has no C sysroot here. For the `/mnt`
+item, two real defects were fixed: the FAT32 mount point was root-owned 0755
+so user tasks got VFS `ReadOnly` (now `0o1777` in `storage::mount_device`, with
+capability/sandbox still authoritative), and the probe name was not FAT 8.3.
+The harness now requires a `persistent mount mutations` marker. Gate PASSES at
+1/2/4 CPUs; fmt, all-target Clippy, workspace tests and feature Clippy pass.
+No new syscall, capability or ABI. Scope: `kernel/src/{main,storage}.rs` and
+`scripts/test-native-app-mutations.py`; no overlap with other owners' WIP.
 
 ## Copilot - filesystem/release/desktop gap closure (2026-11-27) - DONE
 

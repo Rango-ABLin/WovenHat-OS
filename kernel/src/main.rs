@@ -9220,26 +9220,33 @@ fn native_app_mutation_self_test() -> bool {
     // Pass the signed envelope itself: a raw extracted ELF is only admitted
     // for a fixed trusted argv[0], while the WAPP path uses the signature.
     let image = EXTERNAL_APPLICATION;
+    serial::write_line(format_args!(
+        "[NATIVE-APP] mount mnt={} wfs={} stat_mnt={} ata={}",
+        crate::storage::mnt_mounted(),
+        crate::storage::mnt_wovenfs(),
+        vfs::stat("/mnt").is_ok(),
+        crate::block_io::primary_ata_present()
+    ));
+    // Exercise the mutations on the mounted, persistent FAT32 rather than the
+    // in-memory scratch namespace: the live storage self-test has already
+    // mounted it at /mnt, so this proves the signed app's FileWrite path
+    // reaches durable storage end to end.
     const COMMANDS: &[&[&str]] = &[
-        &["/bin/wovenhat-files", "--mkdir", "/tmp/mutation-probe"],
+        &["/bin/wovenhat-files", "--mkdir", "/mnt/mutprobe"],
         &[
             "/bin/wovenhat-files",
             "--write",
-            "/tmp/mutation-probe/note.txt",
+            "/mnt/mutprobe/note.txt",
             "hello",
         ],
         &[
             "/bin/wovenhat-files",
             "--rename",
-            "/tmp/mutation-probe/note.txt",
-            "/tmp/mutation-probe/renamed.txt",
+            "/mnt/mutprobe/note.txt",
+            "/mnt/mutprobe/renamed.txt",
         ],
-        &[
-            "/bin/wovenhat-files",
-            "--rm",
-            "/tmp/mutation-probe/renamed.txt",
-        ],
-        &["/bin/wovenhat-files", "--rm", "/tmp/mutation-probe"],
+        &["/bin/wovenhat-files", "--rm", "/mnt/mutprobe/renamed.txt"],
+        &["/bin/wovenhat-files", "--rm", "/mnt/mutprobe"],
     ];
     for (index, argv) in COMMANDS.iter().enumerate() {
         let Some(program) = userspace::load_elf_with_argv_verified(image, argv) else {
@@ -9260,6 +9267,9 @@ fn native_app_mutation_self_test() -> bool {
         }
         serial::write_line(format_args!("[NATIVE-APP] mutation step {}", index));
     }
+    serial::write_line(format_args!(
+        "[NATIVE-APP] persistent mount mutations: PASSED"
+    ));
     true
 }
 

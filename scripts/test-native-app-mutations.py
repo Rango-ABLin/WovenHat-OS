@@ -19,6 +19,7 @@ def main():
     parser.add_argument("--timeout", type=float, default=300)
     parser.add_argument("--qemu", default=shutil.which("qemu-system-x86_64") or r"C:\Program Files\qemu\qemu-system-x86_64.exe")
     parser.add_argument("--firmware", type=Path)
+    parser.add_argument("--memory", default="5G", help="guest RAM (default: 5G; lower only when host virtual memory is constrained)")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     app = root / "apps" / "woven-files"
@@ -68,7 +69,7 @@ def main():
         [sys.executable, str(root / "scripts" / "create-fat32.py"), str(disk)], cwd=root
     )
     command = [
-        str(qemu), "-accel", "tcg,tb-size=128", "-machine", "pc", "-m", "5G",
+        str(qemu), "-accel", "tcg,tb-size=128", "-machine", "pc", "-m", args.memory,
         "-smp", str(args.cpus), "-display", "none", "-serial", f"file:{serial}",
         "-no-reboot",
         "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04",
@@ -93,6 +94,7 @@ def main():
         "[NATIVE-APP] --write PASS",
         "[NATIVE-APP] --rename PASS",
         "[NATIVE-APP] --rm PASS",
+        "[NATIVE-APP] persistent mount mutations: PASSED",
         "[NATIVE-APP] bounded file mutations: PASSED",
     ]
     missing = [marker for marker in expected if marker not in text]

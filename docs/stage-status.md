@@ -10,6 +10,63 @@ host warning-denying Clippy and the new large-map kernel feature lint pass.
 The exact merged source then passed the full `RUN-STAGE10.7.ps1` Windows
 acceptance chain, in addition to warning-denying all-target Clippy and the
 workspace test suite.
+## Sequential multi-client TCP listener - 2026-11-27 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+The `NetListen`/`AsyncNetAccept` ABI previously yielded exactly one connection:
+`socket_accept_pinned` cleared `listening` and a second client needed a new
+socket. The listener now stays in listen state across accepts. `UserSocket`
+retains its listen port, and `network::poll` re-arms a listener whose accepted
+peer has closed (`abort` then `listen`) before the ordinary teardown path runs.
+An owner-initiated `close` still sets `closing` and is never re-armed. A
+`peer.is_some()` accept now returns `WouldBlock` so the async worker retries
+event-driven instead of completing a guest that loops on accept.
+
+A second real defect was needed for the guest to notice a finished client:
+`NET_RECV` used `tcp::Socket::recv_slice`, which returns `Ok(0)` for an empty
+buffer as well as at EOF. The non-pinned read path now maps an empty open
+connection to `WouldBlock` and reserves zero length for a closed receive half,
+matching `socket_recv_pinned`. The freestanding remote-admin service treats a
+zero-length receive as client disconnect and calls `accept` again on the same
+descriptor; the host mTLS proxy now serves sequential connections instead of
+exiting on the first clean close. No new syscall, capability or ABI version.
+
+Validation: `cargo fmt --all -- --check`, warning-denying `cargo clippy
+--all-targets`, workspace tests, kernel Clippy for `remote-admin-test`, shell
+and proxy Clippy all pass. `scripts/test-remote-admin-freestanding.py` now
+requires two clients: the second query observes the journal left by the first,
+and the gate requires two kernel `[LISTEN] accept complete` markers plus the
+new `[LISTEN] listener re-armed` marker. It PASSES at 1/2/4/8/16 CPUs; one
+4-CPU first attempt timed out and was preserved
+(`remote-admin-freestanding-4cpu-1795766853427750000`), then the identical tree
+passed on rerun. This is still a sequential lifecycle with no simultaneous
+backlog and TLS terminated at the host proxy.
+
+## App mutations on persistent /mnt - 2026-11-27 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+The native WovenFiles mutation gate previously ran its app-level `--mkdir`,
+`--write`, `--rename` and `--rm` sequence under `/tmp`, while only the kernel's
+own `[STORAGE MUTATION]` marker exercised the mounted FAT32. Two real defects
+blocked moving the app to `/mnt`: the mount point was created root-owned with
+mode `0755`, so a uid-1000 user task failed the VFS parent write check with
+`ReadOnly` even though its `FileWrite` capability and `Mounted` sandbox scope
+were valid; and the probe directory used a 14-character name that FAT32's
+8.3-only `mkdir_path` rejects as `BadName`. `storage::mount_device` now gives
+the FAT32 `/mnt` mount point the same `0o1777` VFS mode as `/tmp` (capability,
+sandbox file scope and mounted-path policy remain the authorizing checks), and
+the self-test uses the 8.3 name `mutprobe`. A new
+`[NATIVE-APP] persistent mount mutations: PASSED` marker is required by the
+harness, so a silent fallback to `/tmp` cannot pass.
+
+Validation: `cargo fmt --all -- --check`, warning-denying `cargo clippy
+--all-targets`, workspace tests and warning-denying kernel Clippy for
+`native-app-mutation-test` pass. `scripts/test-native-app-mutations.py` PASSES
+at 1/2/4 CPUs with exit 33, all five mutation steps, the persistent-mount
+marker and the kernel `[STORAGE MUTATION]` marker
+(`audit-artifacts/native-app-mutations-{1,2,4}cpu`). A `--memory` option was
+added to that harness (default unchanged at 5G) because host virtual memory
+would not reserve 5G; no assertion, timeout or budget changed. This is bounded
+software/QEMU evidence against a disposable FAT32 image, not native-media or
+power-loss qualification.
 
 ## Audited filesystem, release and desktop gaps - 2026-11-27 - ACCEPTED (BOUNDED)
 
