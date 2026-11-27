@@ -28,7 +28,6 @@ import os
 from pathlib import Path
 import re
 import shutil
-import socket
 import subprocess
 import sys
 import tempfile
@@ -54,6 +53,62 @@ DEVICE_PATH_RE = re.compile(
 
 class TrustInputError(ValueError):
     """A caller input cannot be accepted at the trust boundary."""
+
+
+def _u16(data: bytes, offset: int) -> int:
+    return int.from_bytes(data[offset:offset + 2], "little")
+
+
+def _u32(data: bytes, offset: int) -> int:
+    return int.from_bytes(data[offset:offset + 4], "little")
+
+
+def _embedded_uefi_executable(image: Path, destination: Path) -> Path:
+    """Extract the contiguous PE/COFF BOOTX64 payload written by our FAT builder."""
+    data = image.read_bytes()
+    for start in range(len(data) - 64):
+        if data[start:start + 2] != b"MZ":
+            continue
+        pe = start + _u32(data, start + 0x3C)
+        if pe + 24 > len(data) or data[pe:pe + 4] != b"PE\0\0":
+            continue
+        sections = _u16(data, pe + 6)
+        optional_size = _u16(data, pe + 20)
+        optional = pe + 24
+        if optional + optional_size > len(data) or _u16(data, optional) != 0x20B:
+            continue
+        # The certificate table is the only PE data directory expressed as a
+        # file offset. It bounds an Authenticode-signed executable.
+        directory = optional + 112 + 4 * 8
+        if directory + 8 > optional + optional_size:
+            continue
+        end = start + _u32(data, directory) + _u32(data, directory + 4)
+        table = optional + optional_size
+        for section in range(sections):
+            header = table + section * 40
+            if header + 40 > len(data):
+                break
+            end = max(end, start + _u32(data, header + 20) + _u32(data, header + 16))
+        if end <= start or end > len(data):
+            continue
+        candidate = data[start:end]
+        if _u32(data, directory + 4) == 0:
+            continue
+        destination.write_bytes(candidate)
+        return destination
+    raise TrustInputError("no signed PE/COFF UEFI executable was found in the guest disk image")
+
+
+def verify_embedded_uefi_signature(sbverify: Path, certificate: Path, image: Path, output: Path) -> None:
+    executable = _embedded_uefi_executable(image, output / "BOOTX64.EFI")
+    verified = subprocess.run(
+        [str(sbverify), "--cert", str(certificate), str(executable)],
+        capture_output=True,
+        check=False,
+    )
+    (output / "sbverify.log").write_bytes(verified.stdout + verified.stderr)
+    if verified.returncode != 0:
+        raise TrustInputError("embedded UEFI executable is not Authenticode-signed by the supplied certificate")
 
 
 def _utc_now() -> str:
@@ -175,12 +230,6 @@ def validate_development_key_material(
     }
 
 
-def _reserve_tcp_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
-
-
 def build_qemu_command(
     qemu: Path,
     ovmf_code: Path,
@@ -204,7 +253,7 @@ def build_qemu_command(
     return [
         str(qemu),
         "-accel",
-        "tcg",
+        "tcg,thread=single",
         "-machine",
         "q35,smm=on",
         "-m",
@@ -213,12 +262,21 @@ def build_qemu_command(
         "1",
         "-display",
         "none",
+        # `-serial` attaches the file directly to QEMU's built-in COM1.  Do
+        # not add a separate `isa-serial` device here: on q35 that can become
+        # COM2 while the kernel intentionally emits its acceptance marker on
+        # the standard COM1 I/O range (0x3f8).
         "-serial",
         f"file:{serial_log}",
         "-no-reboot",
-        "-no-shutdown",
+        "-device",
+        "isa-debug-exit,iobase=0xf4,iosize=0x04",
         "-global",
         "driver=cfi.pflash01,property=secure,value=on",
+        "-global",
+        "ICH9-LPC.disable_s3=1",
+        "-global",
+        "mch.extended-tseg-mbytes=32",
         "-drive",
         f"if=pflash,format=raw,readonly=on,file={ovmf_code}",
         "-drive",
@@ -230,7 +288,9 @@ def build_qemu_command(
         "-device",
         "tpm-tis,tpmdev=tpm0",
         "-drive",
-        f"if=virtio,format=raw,readonly=on,file={disk_image}",
+        f"if=none,id=boot,format=raw,readonly=on,file={disk_image}",
+        "-device",
+        "virtio-blk-pci,drive=boot,bootindex=1",
     ]
 
 
@@ -240,6 +300,30 @@ def _copy_read_only_source(source: Path, destination: Path) -> None:
     if _sha256(source) != before:
         raise TrustInputError(f"source changed while copied: {source.name}")
     os.chmod(destination, 0o600)
+
+
+def provision_tpm_state(swtpm_setup: Path, state: Path, output: Path) -> None:
+    """Create a fresh, local TPM 2.0 state without involving host TPM data."""
+
+    setup = subprocess.run(
+        [
+            str(swtpm_setup),
+            "--tpm2",
+            "--tpm-state",
+            f"dir://{state}",
+            "--createek",
+            "--decryption",
+            "--pcr-banks",
+            "sha256",
+        ],
+        capture_output=True,
+        check=False,
+    )
+    (output / "swtpm-setup.log").write_bytes(
+        (setup.stdout + setup.stderr)[-64 * 1024 :]
+    )
+    if setup.returncode != 0:
+        raise TrustInputError("swtpm_setup could not provision disposable TPM 2.0 state")
 
 
 def _wait_for_process(process: subprocess.Popen[bytes], seconds: float = 3.0) -> bool:
@@ -275,6 +359,7 @@ def _guest_verification_passed(
 def run_virtual_guest(
     qemu: Path,
     swtpm: Path,
+    swtpm_setup: Path,
     ovmf_code: Path,
     ovmf_vars: Path,
     disk_image: Path,
@@ -294,6 +379,7 @@ def run_virtual_guest(
         tpm_state.mkdir()
         serial_log = work / "qemu-serial.log"
         swtpm_log = work / "swtpm.log"
+        swtpm_engine_log = work / "swtpm-engine.log"
         _copy_read_only_source(disk_image, disk_copy)
         _copy_read_only_source(ovmf_vars, vars_copy)
         if os.name == "nt":
@@ -332,6 +418,8 @@ def run_virtual_guest(
             )
         qemu_process: subprocess.Popen[bytes] | None = None
         qemu_returncode: int | None = None
+        qemu_stdout = b""
+        qemu_stderr = b""
         timed_out = False
         try:
             if not _wait_for_process(tpm_process):
@@ -343,19 +431,22 @@ def run_virtual_guest(
                 stderr=subprocess.PIPE,
             )
             try:
-                qemu_process.communicate(timeout=timeout)
+                qemu_stdout, qemu_stderr = qemu_process.communicate(timeout=timeout)
             except subprocess.TimeoutExpired:
                 timed_out = True
                 qemu_process.kill()
-                qemu_process.communicate()
+                qemu_stdout, qemu_stderr = qemu_process.communicate()
             qemu_returncode = qemu_process.returncode
         finally:
             swtpm_returncode = _stop_process(tpm_process)
         serial = serial_log.read_text(encoding="utf-8", errors="replace") if serial_log.exists() else ""
         swtpm_output = swtpm_log.read_text(encoding="utf-8", errors="replace") if swtpm_log.exists() else ""
+        swtpm_engine_output = swtpm_engine_log.read_text(encoding="utf-8", errors="replace") if swtpm_engine_log.exists() else ""
         # Keep bounded evidence, not private key material or an unbounded guest log.
         (output / "qemu-serial.log").write_text(serial[-256 * 1024 :], encoding="utf-8")
+        (output / "qemu.log").write_bytes((qemu_stdout + qemu_stderr)[-256 * 1024 :])
         (output / "swtpm.log").write_text(swtpm_output[-64 * 1024 :], encoding="utf-8")
+        (output / "swtpm-engine.log").write_text(swtpm_engine_output[-256 * 1024 :], encoding="utf-8")
         marker_seen = marker in serial
         return {
             "attempted": True,
@@ -367,6 +458,7 @@ def run_virtual_guest(
             "qemu_command": qemu_command,
             "swtpm_command": swtpm_command,
             "serial_log": str(output / "qemu-serial.log"),
+            "qemu_log": str(output / "qemu.log"),
             "swtpm_log": str(output / "swtpm.log"),
             # The signed-handoff marker is emitted by the production-style
             # guest before it continues into its normal long-lived runtime;
@@ -473,6 +565,16 @@ def qualify(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
         checks.append({"name": "ovmf_code", "status": "BLOCKED", "detail": "OVMF CODE cannot be resolved"})
     file_input("ovmf_vars", args.ovmf_vars, "OVMF VARS template", max_bytes=MAX_KEY_BYTES)
     tool_input("swtpm", args.swtpm, "swtpm")
+    if "swtpm" in resolved:
+        setup = resolved["swtpm"].with_name("swtpm_setup")
+        if setup.is_file() and os.access(setup, os.X_OK):
+            resolved["swtpm_setup"] = setup.resolve()
+            checks.append({"name": "swtpm_setup", "status": "PASS", "path": str(setup.resolve())})
+        else:
+            detail = "swtpm_setup is required to provision disposable TPM 2.0 state"
+            blockers.append(_blocker("missing-swtpm-setup", detail))
+            checks.append({"name": "swtpm_setup", "status": "BLOCKED", "detail": detail})
+    tool_input("sbverify", args.sbverify, "sbverify")
     file_input("disk_image", args.disk_image, "guest disk image")
     file_input("development_key", args.development_key, "development private key", max_bytes=MAX_KEY_BYTES)
     file_input("development_certificate", args.development_certificate, "development certificate", max_bytes=MAX_KEY_BYTES)
@@ -518,6 +620,15 @@ def qualify(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
         else:
             checks.append({"name": "certificate_enrolled_in_ovmf_vars", "status": "PASS"})
 
+    if "sbverify" in resolved and "development_certificate" in resolved and "disk_image" in resolved:
+        try:
+            output.parent.mkdir(parents=True, exist_ok=True)
+            verify_embedded_uefi_signature(resolved["sbverify"], resolved["development_certificate"], resolved["disk_image"], output.parent)
+            checks.append({"name": "embedded_uefi_authenticode_signature", "status": "PASS"})
+        except (TrustInputError, OSError) as exc:
+            blockers.append(_blocker("embedded-uefi-signature-invalid", str(exc)))
+            checks.append({"name": "embedded_uefi_authenticode_signature", "status": "BLOCKED", "detail": str(exc)})
+
     if args.preflight_only:
         blockers.append(_blocker("qemu-execution-not-requested", "preflight-only mode cannot qualify a trust chain"))
     elif not blockers:
@@ -525,6 +636,7 @@ def qualify(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             execution = run_virtual_guest(
                 resolved["qemu"],
                 resolved["swtpm"],
+                resolved["swtpm_setup"],
                 resolved["ovmf_code"],
                 resolved["ovmf_vars"],
                 resolved["disk_image"],
@@ -557,6 +669,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ovmf-code", "--firmware", dest="ovmf_code", type=Path, help="explicit OVMF CODE firmware")
     parser.add_argument("--ovmf-vars", "--firmware-vars", dest="ovmf_vars", type=Path, help="explicit Secure-Boot-enrolled OVMF VARS template")
     parser.add_argument("--swtpm", type=Path, help="explicit swtpm executable")
+    parser.add_argument("--sbverify", type=Path, help="explicit sbsigntool Authenticode verifier")
     parser.add_argument("--disk-image", "--image", dest="disk_image", type=Path, help="existing signed, file-backed guest image")
     parser.add_argument("--development-key", "--dev-key", dest="development_key", type=Path, help="caller-supplied development private key")
     parser.add_argument("--development-certificate", "--dev-certificate", "--dev-cert", dest="development_certificate", type=Path, help="caller-supplied development X.509 certificate")

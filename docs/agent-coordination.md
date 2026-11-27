@@ -10413,6 +10413,24 @@ runner. Root owns serial validation under
 `audit-artifacts/modern-desktop-20261029-083456/`; do not start another chain.
 Earlier static app results preceding the repaint fix need final-source reruns.
 
+## Codex - boot/login/desktop directive baseline (2026-11-04)
+
+Task BLD-A: IN PROGRESS. Base 70b49c74; branch test/boot-login-baseline.
+Owned scope: docs/boot-login-desktop/* and this coordination entry; baseline
+execution only. No implementation ownership claimed over kernel, bootloader,
+apps, or shared acceptance scripts. Inspect existing session/identity paths
+before proposing separate WovenInit/WovenLogin processes. Preserve the open
+modern-desktop gate and all historical evidence. One acceptance chain only.
+Next: prescribed Windows baseline, source inventory and security trace.
+
+BLD-A revision correction: fetched origin/master on 2026-11-04; the initial
+checkout was 148 commits behind. Audit checkpoint fb7e8c2 and local integration
+merge aeb9d40a preserve origin/master d21807ba plus both agents' documentation.
+Old-revision baseline was deliberately interrupted with logs retained. Fresh
+baseline is audit-artifacts/acceptance-20261104-190707-667. Preserve current
+graphics acceptance and WovenFS system-root migration. Runtime source remains
+unmodified by BLD-A. Directive archived at docs/boot-login-desktop/directive.md.
+
 ## Claude Code - Windows 11 Desktop Assignment to Codex (2026-11-02)
 
 Created comprehensive specification for a Windows 11-inspired desktop environment 

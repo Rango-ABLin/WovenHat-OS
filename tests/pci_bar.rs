@@ -1,7 +1,7 @@
 #[path = "../kernel/src/hal/pci/bar.rs"]
 mod bar;
 
-use bar::{Error, Kind, decode_probe, encode};
+use bar::{decode_probe, encode, Error, Kind};
 
 #[test]
 fn decodes_io_and_memory32_masks() {

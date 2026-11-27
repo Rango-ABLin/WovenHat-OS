@@ -4,10 +4,19 @@ members = ["kernel", "libwoven"]
 # Applications are excluded deliberately. They are freestanding Ring-3 ELF
 # images with their own linker script and link flags, so a host-targeted
 # workspace build must not try to compile them.
-exclude = ["vendor/bootloader", "apps/hello", "apps/hello-gui", "apps/woven-shell"]
+exclude = [
+    "vendor/bootloader",
+    "vendor/bootloader-api",
+    "vendor/bootloader-x86_64-common",
+    "apps/hello",
+    "apps/hello-gui",
+    "apps/woven-shell",
+]
 
 [patch.crates-io]
 bootloader = { path = "vendor/bootloader" }
+bootloader_api = { path = "vendor/bootloader-api" }
+bootloader-x86_64-common = { path = "vendor/bootloader-x86_64-common" }
 
 [features]
 wovenweb-vm-test = ["qemu-test", "kernel/wovenweb-vm-test"]
@@ -69,6 +78,8 @@ stage13-20-test = ["qemu-test", "stage13-12-test", "kernel/stage13-20-test"]
 stage13-20b-test = ["qemu-test", "stage13-20-test", "kernel/stage13-20b-test"]
 stage20-15-test = ["qemu-test", "stage13-12-test", "kernel/stage20-15-test"]
 stage24-59-test = ["qemu-test", "system-apps", "kernel/stage24-59-test"]
+phase-e-auth-test = ["qemu-test", "system-apps", "kernel/phase-e-auth-test"]
+phase-e-entropy-test = ["qemu-test", "kernel/phase-e-entropy-test"]
 stage25-7-test = ["qemu-test", "kernel/stage25-7-test"]
 stage25-8-test = ["qemu-test", "kernel/stage25-8-test"]
 stage25-9-test = ["qemu-test", "kernel/stage25-9-test"]
@@ -115,6 +126,7 @@ s03-keyboard-injection-test = ["qemu-test", "kernel/s03-keyboard-injection-test"
 s04-scheduler-accounting-test = ["qemu-test", "kernel/s04-scheduler-accounting-test"]
 s05-memory-pressure-test = ["qemu-test", "kernel/s05-memory-pressure-test"]
 stage31-service-supervisor-test = ["system-apps", "kernel/stage31-service-supervisor-test"]
+woven-init-failure-test = ["system-apps", "kernel/woven-init-failure-test"]
 stage31-driver-restart-test = ["kernel/stage31-driver-restart-test"]
 stage32-1-test = ["qemu-test", "kernel/stage32-1-test"]
 stage32-2-test = ["qemu-test", "kernel/stage32-2-test"]
@@ -267,6 +279,10 @@ sha2 = { version = "0.10.9", default-features = false, features = ["force-soft"]
 wovenhat-release-signing = { path = "tools/release-signing" }
 
 [dev-dependencies]
+heapless = { version = "0.7.17", default-features = false, features = ["serde"] }
+bootloader-boot-config = "0.11.17"
+serde = { version = "1", default-features = false, features = ["derive"] }
+serde-json-core = { version = "0.5", default-features = false }
 unicode-normalization = { version = "0.1.25", default-features = false }
 # The display stack's presentation path takes the bootloader's framebuffer
 # description, so host tests of compositing need the same type the kernel sees

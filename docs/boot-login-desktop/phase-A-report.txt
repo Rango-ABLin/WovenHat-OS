@@ -1,0 +1,36 @@
+WOVENHAT OS IMPLEMENTATION REPORT
+
+Phase: A — Baseline and architecture
+Status: COMPLETE
+Base commit: d21807ba (initial stale checkout 70b49c74 reconciled)
+Current commit: 9393d46a; accepted runtime a980619e; supplemental test-only lint repair follows
+Branch: test/boot-login-baseline
+Agent: Codex
+
+Implemented: source/authority inventory, coordination and acceptance records;
+  diagnostics host serial coverage; edition-compatible WovenFS probe; current
+  KDF in disposable account fixture; consistent mixed-edition formatting.
+Files changed: docs/boot-login-desktop/*, coordination/status/roadmap, rustfmt.toml,
+  tests/diagnostics.rs, tests/test_account_fixture.py, scripts/create-account-fixture.py,
+  kernel/src/wfs.rs and formatter-only workspace files; libwoven shadow-test index.
+Interfaces added: host recording serial double; no runtime ABI change.
+Security changes: fixture compatibility only; no production security completion.
+
+Build result: TESTED — PASS
+Unit tests: TESTED — PASS (208 Python with six skips; root Rust tests; 212 libwoven units)
+Integration tests: TESTED — PASS (diagnostics emission and 20 crash-recovery cases)
+QEMU result: TESTED — PASS (prescribed Windows chain and Stage12.1–12.5)
+1-CPU result: TESTED — PASS
+2-CPU result: TESTED — PASS
+4-CPU result: TESTED — PASS
+
+Known failures: original host lint, formatting, shared-cache/network-restricted attempts
+  retained; corrected gates pass. Virtual trust preflight remains NOT_QUALIFIED.
+Regressions: none observed within the executed baseline gates.
+Remaining dependencies: Phase B boot configuration/failure tests, protected credentials,
+  production entropy/provisioning, init/readiness/session work, graphical/negative/recovery
+  acceptance, virtual trust inputs and native qualification. The OS is not release ready.
+
+Next task: B1 — bounded fail-closed boot configuration parsing and actual UEFI tests
+Next agent: Codex
+Handoff reference: docs/boot-login-desktop/handoff.md

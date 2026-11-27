@@ -1,0 +1,5 @@
+cargo:rerun-if-changed=build.rs
+cargo:rerun-if-changed=C:\Users\banda\WovenHat-OS\.cargo-build-virtual-trust\x86_64-unknown-none\release\deps\artifact\wovenhat-kernel-9766b5515cd07b24\bin\wovenhat_kernel-9766b5515cd07b24
+cargo:rerun-if-env-changed=WOVENHAT_BOOT_SIGNING_SEED_HEX
+cargo:rerun-if-env-changed=WOVENHAT_BOOT_TRUSTED_PUBLIC_KEY_HEX
+cargo:rustc-env=WOVENHAT_UEFI_IMAGE=C:\Users\banda\WovenHat-OS\.cargo-build-virtual-trust\release\build\wovenhat-os-323c1eff96ce6eda\out\wovenhat-os-uefi.img

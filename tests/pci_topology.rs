@@ -3,7 +3,7 @@
 #[path = "../kernel/src/hal/pci/topology.rs"]
 mod topology;
 
-use topology::{BridgeRoute, Error, FunctionAddress, FunctionDescriptor, MAX_FUNCTIONS, Topology};
+use topology::{BridgeRoute, Error, FunctionAddress, FunctionDescriptor, Topology, MAX_FUNCTIONS};
 
 fn endpoint(bus: u8, device: u8) -> FunctionDescriptor {
     FunctionDescriptor {

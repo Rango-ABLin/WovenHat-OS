@@ -11,7 +11,7 @@ nested Cargo invocation its own target and intermediate build directories under
 `OUT_DIR`. Otherwise the inherited project-local `CARGO_TARGET_DIR` and
 `CARGO_BUILD_BUILD_DIR` can make the installer wait indefinitely for an artifact
 lock held by the parent build. Both child directories remain project-local.
-The bootloader version, image-generation code, and runtime code are unchanged.
+The bootloader version and image-generation code are unchanged.
 The BIOS build is not enabled by WovenHat and is unchanged.
 
 Local UEFI source selection requires `uefi/Cargo.toml` to be a file. A leftover
@@ -26,3 +26,43 @@ CI/editor configuration and documentation folders are omitted. Cargo excludes
 this dependency from the workspace. The root crates.io patch selects it for
 the host image builder; this is not a replacement for the kernel's bootloader
 API dependency.
+
+## BLD-B1 runtime configuration boundary
+
+The version-matched `bootloader-x86_64-uefi` 0.11.17 runtime is now retained
+under `uefi/`, rather than editing Cargo's global registry cache. Its original
+archive SHA-256 is
+`a6f5c10daaa697564ff78776f23ff0ae6e401c7ead7af41d980a913869a8b67f`.
+The original main/memory-descriptor/manifest/lock files were compared with
+that archive before changes. The parent MIT/Apache-2.0 licenses apply.
+
+`uefi/src/config.rs` bounds boot.json to 4096 bytes, accepts existing known
+settings with an omitted version or explicit version 1, and rejects malformed,
+duplicate, unknown, unsupported-version and trailing-data policy. The UEFI
+entry initializes a diagnostic console with defaults on parse failure, emits
+a static error and halts before ramdisk loading/ExitBootServices. It never
+continues boot with a rejected policy. Unknown requested features fail closed;
+root selection, boot menus/timeouts, recovery and kernel command-line forwarding
+are not implemented by this increment. Existing valid logging/framebuffer
+preferences and the BootInfo/mapper contract are preserved.
+
+Disk and TFTP file-size metadata is checked before allocating/reading a
+configuration payload, including empty files, so the parser limit is also a
+preallocation bound. B2 adds preallocation kernel bounds and fallible ELF/boot-contract inspection;
+ramdisk handling retains its existing policy.
+Two upstream lint cleanups remove an unnecessary pointer `mut` and a redundant
+formatting borrow. Runtime dependency versions/checksums remain identical to
+the original UEFI lockfile; only direct Serde and xmas-elf dependency edges are added.
+
+The local installer uses one isolated target directory and `--force` within
+OUT_DIR so edited runtime code cannot silently reuse the registry binary.
+It watches a local common directory only if one exists; common code remains
+the locked registry dependency. No new hand-written unsafe code is introduced.
+
+
+B2 (under qualification) constructs the same public common::Kernel fields
+from a bounded validated payload instead of calling its infallible parse helper.
+The common mapper, handoff, signature measurement and BootInfo remain unchanged.
+Missing kernels retain disk-to-TFTP fallback and then stop explicitly. Image
+structure validation is not a signature or trust policy. See
+`docs/boot-login-desktop/boot-image-validation.md` for scope and remaining gates.

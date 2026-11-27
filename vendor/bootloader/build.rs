@@ -1,8 +1,17 @@
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
 const BOOTLOADER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn main() {
+    println!("cargo:rerun-if-env-changed=WOVENHAT_UEFI_AUTHENTICODE_SIGN");
+    println!("cargo:rerun-if-env-changed=WOVENHAT_UEFI_SIGNING_KEY");
+    println!("cargo:rerun-if-env-changed=WOVENHAT_UEFI_SIGNING_CERTIFICATE");
+    println!("cargo:rerun-if-env-changed=WOVENHAT_UEFI_WSL_DISTRO");
+    println!("cargo:rerun-if-env-changed=CARGO_NET_OFFLINE");
+    println!("cargo:rerun-if-env-changed=WOVENHAT_UEFI_QUALIFICATION_FAULT");
     #[cfg(not(feature = "uefi"))]
     fn uefi_main() {}
     #[cfg(not(feature = "bios"))]
@@ -78,6 +87,25 @@ fn build_uefi_bootloader() -> PathBuf {
         cmd.arg("--version").arg(BOOTLOADER_VERSION);
     }
     cmd.arg("--locked");
+    if let Ok(fault) = env::var("WOVENHAT_UEFI_QUALIFICATION_FAULT") {
+        assert!(
+            matches!(
+                fault.as_str(),
+                "page-table" | "mapping" | "exit-retry" | "exit-failure"
+            ),
+            "unsupported UEFI qualification fault"
+        );
+        cmd.arg("--features").arg(format!("qualification-{fault}"));
+    }
+    if matches!(
+        env::var("CARGO_NET_OFFLINE").as_deref(),
+        Ok("true") | Ok("1")
+    ) {
+        // The parent build explicitly selected cached-only resolution. Keep
+        // the nested runtime install in the same mode so a clean project
+        // target directory remains reproducible without network access.
+        cmd.arg("--offline");
+    }
     cmd.arg("--target").arg("x86_64-unknown-uefi");
     cmd.arg("-Zbuild-std=core")
         .arg("-Zbuild-std-features=compiler-builtins-mem");
@@ -98,9 +126,92 @@ fn build_uefi_bootloader() -> PathBuf {
             path.exists(),
             "uefi bootloader executable does not exist after building"
         );
+        sign_uefi_authenticode_if_requested(&path);
         path
     } else {
         panic!("failed to build uefi bootloader");
+    }
+}
+
+#[cfg(all(feature = "uefi", windows))]
+fn wsl_path(path: &Path) -> String {
+    let path = match path.canonicalize() {
+        Ok(path) => path,
+        Err(_) => {
+            let parent = path.parent().expect("signing path has no parent");
+            parent
+                .canonicalize()
+                .expect("failed to canonicalize signing output parent")
+                .join(path.file_name().expect("signing path has no file name"))
+        }
+    };
+    let text = path.to_string_lossy().replace('\\', "/");
+    let text = text.strip_prefix("//?/").unwrap_or(&text);
+    let bytes = text.as_bytes();
+    assert!(
+        bytes.len() >= 3 && bytes[1] == b':' && bytes[2] == b'/',
+        "signing paths must be on a mounted Windows drive"
+    );
+    format!(
+        "/mnt/{}/{}",
+        (bytes[0] as char).to_ascii_lowercase(),
+        &text[3..]
+    )
+}
+
+/// Sign the boot manager that is embedded by `include_bytes!` below.
+///
+/// This is deliberately opt-in. Production and trust builds fail closed when
+/// signing was requested but the explicit development key, certificate, or
+/// WSL signer cannot be used. No private key bytes are copied into Cargo
+/// output or command diagnostics.
+#[cfg(all(feature = "uefi", windows))]
+fn sign_uefi_authenticode_if_requested(efi_path: &Path) {
+    let mode = match env::var("WOVENHAT_UEFI_AUTHENTICODE_SIGN") {
+        Ok(mode) => mode,
+        Err(env::VarError::NotPresent) => return,
+        Err(error) => panic!("invalid UEFI Authenticode signing mode: {error}"),
+    };
+    assert_eq!(
+        mode, "sbsign-wsl",
+        "WOVENHAT_UEFI_AUTHENTICODE_SIGN must be exactly sbsign-wsl"
+    );
+    let key = PathBuf::from(
+        env::var_os("WOVENHAT_UEFI_SIGNING_KEY")
+            .expect("UEFI Authenticode signing requires WOVENHAT_UEFI_SIGNING_KEY"),
+    );
+    let certificate = PathBuf::from(
+        env::var_os("WOVENHAT_UEFI_SIGNING_CERTIFICATE")
+            .expect("UEFI Authenticode signing requires WOVENHAT_UEFI_SIGNING_CERTIFICATE"),
+    );
+    assert!(
+        key.is_file(),
+        "UEFI Authenticode signing key is not a regular file"
+    );
+    assert!(
+        certificate.is_file(),
+        "UEFI Authenticode signing certificate is not a regular file"
+    );
+    let signed = efi_path.with_extension("authenticode-signed.efi");
+    let distro = env::var("WOVENHAT_UEFI_WSL_DISTRO").unwrap_or_else(|_| "Ubuntu".into());
+    let status = Command::new("wsl.exe")
+        .args(["-d", &distro, "--", "/usr/bin/sbsign"])
+        .args(["--key", &wsl_path(&key)])
+        .args(["--cert", &wsl_path(&certificate)])
+        .args(["--output", &wsl_path(&signed), &wsl_path(efi_path)])
+        .status()
+        .expect("failed to invoke WSL sbsign");
+    assert!(
+        status.success(),
+        "WSL sbsign rejected the UEFI boot manager"
+    );
+    fs::rename(&signed, efi_path).expect("failed to replace UEFI boot manager with signed output");
+}
+
+#[cfg(all(feature = "uefi", not(windows)))]
+fn sign_uefi_authenticode_if_requested(_efi_path: &Path) {
+    if env::var_os("WOVENHAT_UEFI_AUTHENTICODE_SIGN").is_some() {
+        panic!("sbsign-wsl UEFI Authenticode signing is supported only by the Windows build host");
     }
 }
 

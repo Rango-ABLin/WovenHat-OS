@@ -1,0 +1,10 @@
+[package]
+name = "wovenhat-boot-config-fixtures"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+bootloader = { path = "../../vendor/bootloader", default-features = false, features = ["uefi"] }

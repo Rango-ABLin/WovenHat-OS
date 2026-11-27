@@ -292,6 +292,38 @@ const PIN_LOCKOUT: u64 = 5 * libwoven::time::TICKS_PER_SECOND;
 /// Accounts the sign-in screen offers.
 const MAX_ACCOUNTS: usize = 4;
 
+/// Public login profile supplied by the kernel. Credential salts and
+/// verifiers stay in the privileged identity authority and are never parsed
+/// by WovenShell.
+#[derive(Clone, Copy)]
+struct PublicAccount {
+    name: [u8; libwoven::accounts::MAX_NAME],
+    name_len: usize,
+}
+
+impl PublicAccount {
+    fn parse(line: &[u8]) -> Option<Self> {
+        let line = line.strip_suffix(b"\r").unwrap_or(line);
+        if line.is_empty()
+            || line.len() > libwoven::accounts::MAX_NAME
+            || !line.iter().all(|byte| (b' '..=b'~').contains(byte))
+            || line.contains(&b':')
+        {
+            return None;
+        }
+        let mut account = Self {
+            name: [0; libwoven::accounts::MAX_NAME],
+            name_len: line.len(),
+        };
+        account.name[..line.len()].copy_from_slice(line);
+        Some(account)
+    }
+
+    fn name(&self) -> &[u8] {
+        &self.name[..self.name_len]
+    }
+}
+
 /// Whether the locked screen is the sign-in screen, the lock screen, or the
 /// signed-in account changing its own PIN.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -367,8 +399,8 @@ fn log(parts: &[&[u8]]) {
 }
 
 /// Wallpaper colour at `(x, y)` on a screen `height` pixels tall: a vertical
-/// gradient with a basket-weave texture over it, alternating light and dark
-/// `WEAVE_PITCH`-sized blocks with a thin highlight seam between them.
+/// gradient with a basket-weave texture over it, alternating faint diagonal
+/// light and dark bands at the `WEAVE_PITCH` interval.
 fn wallpaper(x: i32, y: i32, height: i32) -> u32 {
     let span = (height - 1).max(1);
     let t = (y.clamp(0, span) * 255 / span) as u8;
@@ -377,6 +409,18 @@ fn wallpaper(x: i32, y: i32, height: i32) -> u32 {
     } else {
         blend(WALLPAPER_BOTTOM, WALLPAPER_TOP, t)
     };
+    let band = ((x + y) / WEAVE_PITCH) % 2 == 0;
+    let tint = if band { WEAVE } else { WEAVE_SHADE };
+    blend(tint, base, WEAVE_TINT_OPACITY)
+}
+
+/// The login wallpaper remains decorative and theme-neutral. High contrast
+/// applies to the opaque login card and controls, so toggling it needs only a
+/// bounded card repaint rather than a full framebuffer transition.
+fn login_wallpaper(x: i32, y: i32, height: i32) -> u32 {
+    let span = (height - 1).max(1);
+    let t = (y.clamp(0, span) * 255 / span) as u8;
+    let base = blend(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
     let band = ((x + y) / WEAVE_PITCH) % 2 == 0;
     let tint = if band { WEAVE } else { WEAVE_SHADE };
     blend(tint, base, WEAVE_TINT_OPACITY)
@@ -396,6 +440,26 @@ fn clock_text(time: Option<DateTime>, seconds: bool) -> ([u8; 8], usize) {
         None => *b"--:--:--",
     };
     (text, if seconds { 8 } else { 5 })
+}
+
+/// Login-screen date in an unambiguous, fixed-width form.
+fn date_text(time: Option<DateTime>) -> [u8; 10] {
+    let Some(time) = time else {
+        return *b"---- -- --";
+    };
+    let year = time.year;
+    [
+        b'0' + ((year / 1000) % 10) as u8,
+        b'0' + ((year / 100) % 10) as u8,
+        b'0' + ((year / 10) % 10) as u8,
+        b'0' + (year % 10) as u8,
+        b'-',
+        b'0' + time.month / 10,
+        b'0' + time.month % 10,
+        b'-',
+        b'0' + time.day / 10,
+        b'0' + time.day % 10,
+    ]
 }
 
 /// Fill an already-allocated, already-zeroed catalog in place. Never builds
@@ -672,34 +736,22 @@ use model::{load_catalog, matches, App, Child, Note, Toast, TrayIcon, Window};
 mod painter;
 use painter::Painter;
 
-/// The desktop taskbar's launcher affordance. Opens the Start overview:
-/// search, current-workspace windows, and the application grid.
+/// The desktop taskbar's launcher affordance. Opens WovenStart.
 const START_LABEL: &str = "Start";
 const START_BUTTON_WIDTH: i32 = 58;
 const START_ICON_SIZE: i32 = 14;
 const TASKBAR_ENTRY_GAP: i32 = 4;
 
-/// Launcher overview layout (M3). Reuses `launcher_open`/`query`/
-/// `selected`/`filtered()` as its shared search/selection state.
-const OVERVIEW_MARGIN: i32 = 16;
-const OVERVIEW_SEARCH_HEIGHT: i32 = PANEL_ROW + 16;
-const OVERVIEW_THUMB_ROW_HEIGHT: i32 = 90;
-const OVERVIEW_THUMB_WIDTH: i32 = 140;
-const OVERVIEW_THUMB_HEIGHT: i32 = 74;
-const OVERVIEW_THUMB_GAP: i32 = 10;
-const OVERVIEW_CELL_WIDTH: i32 = 96;
-const OVERVIEW_CELL_HEIGHT: i32 = 92;
-const OVERVIEW_CELL_GAP: i32 = 12;
-const OVERVIEW_APP_ICON_SIZE: i32 = 48;
-/// The Dash (M4): favorites and running apps, one row below the search
-/// field. Icon-only, no label -- GNOME-dash-style, not the labeled app
-/// grid below it.
-const OVERVIEW_DASH_ICON: i32 = 40;
-const OVERVIEW_DASH_GAP: i32 = 10;
-const OVERVIEW_DASH_ROW_HEIGHT: i32 = OVERVIEW_DASH_ICON;
-/// Favorites (the same curated set as the desktop shortcuts) plus running
-/// apps, deduplicated, bounded to this many Dash entries.
-const DASH_MAX: usize = 8;
+/// Bounded WovenStart menu. It stays above the bottom taskbar instead of
+/// becoming a full-screen workspace/Activities overview.
+const START_MENU_WIDTH: i32 = 160;
+const START_MENU_ROW: i32 = 14;
+const OVERVIEW_MARGIN: i32 = 1;
+const OVERVIEW_SEARCH_HEIGHT: i32 = START_MENU_ROW;
+const OVERVIEW_CELL_WIDTH: i32 = START_MENU_WIDTH - 2;
+const OVERVIEW_CELL_HEIGHT: i32 = START_MENU_ROW;
+const OVERVIEW_CELL_GAP: i32 = 0;
+const OVERVIEW_APP_ICON_SIZE: i32 = 12;
 
 struct Desktop {
     /// The primary monitor's width; the taskbar spans it.
@@ -784,7 +836,7 @@ struct Desktop {
     lockout_until: libwoven::time::Ticks,
     prompt: LockPrompt,
     mode: LockMode,
-    accounts: [Option<libwoven::accounts::Account>; MAX_ACCOUNTS],
+    accounts: [Option<PublicAccount>; MAX_ACCOUNTS],
     /// The account chosen on the sign-in screen.
     chosen: usize,
     /// The account signed in, if any.
@@ -1168,7 +1220,7 @@ impl Desktop {
         let overview = self.overview_area();
         Area::new(
             overview.x + OVERVIEW_MARGIN,
-            overview.y + OVERVIEW_MARGIN,
+            overview.y + 1 + START_MENU_ROW,
             overview.width - 2 * OVERVIEW_MARGIN,
             OVERVIEW_SEARCH_HEIGHT,
         )
@@ -1257,9 +1309,7 @@ impl Desktop {
 
     /// Grid columns that fit the overview's width.
     fn overview_cols(&self) -> usize {
-        let overview = self.overview_area();
-        let available = overview.width - 2 * OVERVIEW_MARGIN + OVERVIEW_CELL_GAP;
-        (available / (OVERVIEW_CELL_WIDTH + OVERVIEW_CELL_GAP)).max(1) as usize
+        1
     }
 
     /// App grid cell `index`'s area (row-major). `MAX_APPS` (64) always
@@ -1879,6 +1929,15 @@ impl Desktop {
             );
         }
 
+        // Keep the authenticated identity visible beside the workspace
+        // switcher. The public profile contains only the bounded account
+        // name; credential salts and verifiers never enter WovenShell.
+        if let Some(account) = self.session.and_then(|index| self.accounts[index]) {
+            let text = core::str::from_utf8(account.name()).unwrap_or("?");
+            let x = self.workspace_area(0).x - 6 - font::text_width(text) as i32;
+            canvas.draw_text_system(x, self.text_y(), text, theme_text());
+        }
+
         // The system menu button opens the existing Quick Settings panel.
         let button = self.qs_button();
         let qs_hover = !self.qs_open && button.contains(self.pointer.0, self.pointer.1);
@@ -1957,10 +2016,9 @@ impl Desktop {
         }
     }
 
-    /// The launcher overview's content (M3): search field, this
-    /// workspace's window cards, and the filtered app grid, drawn at its
-    /// own real screen position in `canvas`; no alternate legacy chrome is
-    /// rendered behind this overview.
+    /// WovenStart content: a branded header, search row and bounded result
+    /// rows. Workspaces remain on the taskbar; this is not an Activities
+    /// overview and does not render workspace/window previews.
     fn paint_overview_content(&self, canvas: &mut Canvas<'_>) {
         let overview = self.overview_area();
         fill_rounded_blended(canvas, overview, CHROME_CARD_RADIUS, theme_panel(), 240);
@@ -2338,7 +2396,7 @@ impl Desktop {
     fn render_lock(&self, canvas: &mut Canvas<'_>) {
         let height = self.height;
         self.render_floor_3d(canvas, |x, y| {
-            blend(rgb(0, 0, 0), wallpaper(x, y, height), LOCK_DIM)
+            blend(rgb(0, 0, 0), login_wallpaper(x, y, height), LOCK_DIM)
         });
         let middle = self.height / 2;
         let catalog = shell_catalog(self.language);
@@ -2354,6 +2412,9 @@ impl Desktop {
         fill_rounded_blended(canvas, card, CHROME_CARD_RADIUS, palette.surface, 170);
 
         if self.mode == LockMode::SignIn {
+            let date = date_text(self.time);
+            let date = core::str::from_utf8(&date).unwrap_or("---- -- --");
+            canvas.draw_text_system(centred(date), middle - 112, date, theme_muted());
             // A circular avatar for the selected account: its initial inside
             // a filled circle, the same technique used for rounded chrome.
             let initial = self.accounts[self.chosen]
@@ -2483,6 +2544,32 @@ impl Desktop {
                 fill_circle(canvas, left + index * 10 + 3, middle + 57, 6, palette.text);
             }
         }
+        if self.mode == LockMode::SignIn {
+            let submit = self.login_submit_area();
+            fill_rounded(canvas, submit, CHROME_RADIUS_SMALL, theme_entry(true));
+            let label = catalog.lookup("sign_in", "Sign in");
+            canvas.draw_text_system(
+                submit.x + (submit.width - font::text_width(label) as i32) / 2,
+                submit.y + 6,
+                label,
+                theme_text(),
+            );
+            for (index, label) in ["Power F2", "Restart F3", "Contrast F4"]
+                .iter()
+                .enumerate()
+            {
+                let action = self.login_action_area(index);
+                fill_rounded(canvas, action, CHROME_RADIUS_SMALL, theme_panel());
+                canvas.draw_text_system(
+                    action.x + (action.width - font::text_width(label) as i32) / 2,
+                    action.y + 6,
+                    label,
+                    theme_text(),
+                );
+            }
+            let hint = "Tab user   Enter sign in";
+            canvas.draw_text_system(centred(hint), middle + 88, hint, theme_muted());
+        }
     }
 
     fn lock(&mut self) -> Area {
@@ -2499,6 +2586,50 @@ impl Desktop {
         self.forget_entry();
         self.prompt = LockPrompt::Enter;
         log(&[b"woven-shell: locked"]);
+        self.screen()
+    }
+
+    /// End the authenticated desktop transaction. Descendants receive an
+    /// uncatchable termination request before the kernel session is closed;
+    /// closing revokes inherited credentials immediately, even while a child
+    /// is completing scheduler-owned teardown.
+    fn logout(&mut self) -> Area {
+        let _ = self.close_panels();
+        self.cancel_pointer_gesture();
+        for child in self.children.iter().flatten() {
+            if libwoven::kill(
+                libwoven::process::SignalTarget::Process(child.pid),
+                9,
+            )
+            .is_err()
+            {
+                log(&[b"woven-shell: logout child termination failed"]);
+            }
+        }
+        if let Some(session) = self.kernel_session {
+            if libwoven::identity::session_close(session).is_err() {
+                log(&[b"woven-shell: kernel identity close failed"]);
+                return self.screen();
+            }
+        }
+        self.wipe_change_pin_old();
+        for byte in &mut self.change_pin_new {
+            // SAFETY: a valid byte of our own array; volatile so logout does
+            // not leave credential material for the next session.
+            unsafe { core::ptr::write_volatile(byte, 0) };
+        }
+        self.change_pin_new_length = 0;
+        self.change_pin = None;
+        self.kernel_session = None;
+        self.session = None;
+        self.chosen = 0;
+        self.locked = true;
+        self.mode = LockMode::SignIn;
+        self.failures = 0;
+        self.lockout_until = 0;
+        self.forget_entry();
+        self.prompt = LockPrompt::Enter;
+        log(&[b"woven-shell: logged out"]);
         self.screen()
     }
 
@@ -2537,17 +2668,10 @@ impl Desktop {
         self.entry_length = 0;
     }
 
-    /// Check the typed digits: against the chosen account when signing in,
-    /// the signed-in account when locked or confirming its current PIN to
-    /// change it, or else the `--pin` PIN.
+    /// Check the legacy `--pin`-only mode. Account-backed authentication is
+    /// always delegated to the kernel identity authority; WovenShell never
+    /// receives verifier material with which to check it locally.
     fn pin_matches(&self) -> bool {
-        let account = match self.mode {
-            LockMode::SignIn => Some(self.chosen),
-            LockMode::Lock | LockMode::ChangePin => self.session,
-        };
-        if let Some(account) = account.and_then(|index| self.accounts[index]) {
-            return account.verify(&self.entry[..self.entry_length]);
-        }
         let Some((stored, length)) = &self.pin else {
             return true;
         };
@@ -2562,6 +2686,9 @@ impl Desktop {
     /// A key at the lock screen. Returns the area to repaint.
     fn lock_key(&mut self, key: Key) -> Area {
         match key {
+            Key::F2 if self.mode == LockMode::SignIn => self.power(false),
+            Key::F3 if self.mode == LockMode::SignIn => self.power(true),
+            Key::F4 if self.mode == LockMode::SignIn => self.toggle_login_contrast(),
             Key::Char(digit) if digit.is_ascii_digit() => {
                 if self.entry_length < MAX_PIN {
                     self.entry[self.entry_length] = digit as u8;
@@ -2604,11 +2731,9 @@ impl Desktop {
                     let kernel_authenticated = match self.mode {
                         LockMode::SignIn => match self.accounts[self.chosen] {
                             Some(account) => {
-                                let digest =
-                                    account.password_digest(&self.entry[..self.entry_length]);
-                                match libwoven::identity::session_open_verified(
+                                match libwoven::identity::session_open(
                                     account.name(),
-                                    &digest,
+                                    &self.entry[..self.entry_length],
                                 ) {
                                     Ok(session) => {
                                         self.kernel_session = Some(session);
@@ -2623,11 +2748,12 @@ impl Desktop {
                             self.kernel_session,
                             self.session.and_then(|index| self.accounts[index]),
                         ) {
-                            (Some(session), Some(account)) => {
-                                let digest =
-                                    account.password_digest(&self.entry[..self.entry_length]);
-                                libwoven::identity::session_unlock_verified(session, &digest)
-                                    .is_ok()
+                            (Some(session), Some(_account)) => {
+                                libwoven::identity::session_unlock(
+                                    session,
+                                    &self.entry[..self.entry_length],
+                                )
+                                .is_ok()
                             }
                             // No account ever signed in: this is the legacy
                             // `--pin`-only mode, which has no kernel session
@@ -2676,6 +2802,51 @@ impl Desktop {
             }
             _ => Area::new(0, 0, 0, 0),
         }
+    }
+
+    fn toggle_login_contrast(&mut self) -> Area {
+        let next = u8::from(!high_contrast());
+        THEME_MODE.store(next, Ordering::Relaxed);
+        log(if next != 0 {
+            &[b"woven-shell: login high contrast on"]
+        } else {
+            &[b"woven-shell: login high contrast off"]
+        });
+        self.login_card()
+    }
+
+    fn login_pointer_press(&mut self) -> Area {
+        if self.mode != LockMode::SignIn {
+            return Area::new(0, 0, 0, 0);
+        }
+        let (x, y) = self.pointer;
+        if let Some(index) = self
+            .accounts
+            .iter()
+            .enumerate()
+            .find_map(|(index, account)| {
+                (account.is_some() && self.login_account_area(index).contains(x, y))
+                    .then_some(index)
+            })
+        {
+            self.chosen = index;
+            self.forget_entry();
+            self.prompt = LockPrompt::Enter;
+            return self.lock_account_area();
+        }
+        if self.login_submit_area().contains(x, y) {
+            return self.lock_key(Key::Enter);
+        }
+        if self.login_action_area(0).contains(x, y) {
+            return self.power(false);
+        }
+        if self.login_action_area(1).contains(x, y) {
+            return self.power(true);
+        }
+        if self.login_action_area(2).contains(x, y) {
+            return self.toggle_login_contrast();
+        }
+        Area::new(0, 0, 0, 0)
     }
 
     /// Securely wipe the stashed current PIN.
@@ -2790,7 +2961,7 @@ impl Desktop {
                 let succeeded = matches!(result, Some(Ok(())));
                 if succeeded {
                     self.accounts = [None; MAX_ACCOUNTS];
-                    load_accounts("/etc/wovenhat/accounts", &mut self.accounts);
+                    load_accounts("/etc/wovenhat/users", &mut self.accounts);
                     self.session = session_name.and_then(|(value, length)| {
                         self.accounts.iter().position(|account| {
                             account.is_some_and(|account| account.name() == &value[..length])
@@ -3422,7 +3593,7 @@ impl Desktop {
         if self.three_d {
             self.render_qs_3d(canvas, area);
         } else {
-            self.paint_qs_content(canvas, area);
+            self.paint_qs_content(canvas, area, false);
         }
     }
 
@@ -3446,7 +3617,7 @@ impl Desktop {
             area.width as usize,
             area.height as usize,
         ) else {
-            return self.paint_qs_content(canvas, area);
+            return self.paint_qs_content(canvas, area, true);
         };
         texture.shade(|x, y| {
             blend(
@@ -3455,7 +3626,7 @@ impl Desktop {
                 PANEL_OPACITY,
             )
         });
-        self.paint_qs_content(&mut texture, Area::new(0, 0, area.width, area.height));
+        self.paint_qs_content(&mut texture, Area::new(0, 0, area.width, area.height), true);
         // The projected quad is narrower than the flat panel's footprint at
         // its receded top edge, so the corners it no longer covers would
         // otherwise still show whatever the previous frame drew there (the
@@ -3489,7 +3660,7 @@ impl Desktop {
             camera.project(-half_width, half_height, 0),
             camera.project(half_width, half_height, 0),
         ) else {
-            return self.paint_qs_content(canvas, area);
+            return self.paint_qs_content(canvas, area, true);
         };
         let vertex =
             |(x, y, depth): (i32, i32, u16), u: u8, v: u8| Vertex3Tex::new(x, y, depth, u, v);
@@ -3504,7 +3675,7 @@ impl Desktop {
             canvas.width(),
             canvas.height(),
         ) else {
-            return self.paint_qs_content(canvas, area);
+            return self.paint_qs_content(canvas, area, true);
         };
         depth.clear(u16::MAX);
         let mut renderer = Renderer::new(canvas);
@@ -3668,8 +3839,8 @@ impl Desktop {
         Area::new(clock.x - 14, self.taskbar_top() + 7, 10, 11)
     }
 
-    /// The Notification Center, sized to its rows, drops down from the
-    /// clock, calendar/notification-popover style; empty while closed.
+    /// The Notification Center, sized to its rows, sits above the bottom
+    /// taskbar's right end; empty while closed.
     fn center_area(&self) -> Area {
         if !self.center_open {
             return Area::new(0, 0, 0, 0);
@@ -3685,7 +3856,7 @@ impl Desktop {
     /// in `canvas`. Used both for the ordinary flat 2D panel and, rendered
     /// once at local origin into an offscreen texture, as the source the 3D
     /// mode's perspective projection samples.
-    fn paint_center_content(&self, canvas: &mut Canvas<'_>, area: Area) {
+    fn paint_center_content(&self, canvas: &mut Canvas<'_>, area: Area, background: bool) {
         let (x, y) = (area.x, area.y);
         // Same rounded, near-opaque card treatment as the Quick Settings
         // panel and the lock screen, instead of a hard-edged square outline
@@ -3726,7 +3897,7 @@ impl Desktop {
         if self.three_d {
             self.render_center_3d(canvas, area);
         } else {
-            self.paint_center_content(canvas, area);
+            self.paint_center_content(canvas, area, false);
         }
     }
 
@@ -3746,7 +3917,7 @@ impl Desktop {
             area.width as usize,
             area.height as usize,
         ) else {
-            return self.paint_center_content(canvas, area);
+            return self.paint_center_content(canvas, area, true);
         };
         texture.shade(|x, y| {
             blend(
@@ -3755,7 +3926,7 @@ impl Desktop {
                 PANEL_OPACITY,
             )
         });
-        self.paint_center_content(&mut texture, Area::new(0, 0, area.width, area.height));
+        self.paint_center_content(&mut texture, Area::new(0, 0, area.width, area.height), true);
         // As in `render_qs_3d`: paint the (3D-projected) desktop background
         // before the depth buffer below is (re-)cleared, since
         // `render_desktop_background` clears and uses that same shared
@@ -3779,7 +3950,7 @@ impl Desktop {
             camera.project(-half_width, half_height, 0),
             camera.project(half_width, half_height, 0),
         ) else {
-            return self.paint_center_content(canvas, area);
+            return self.paint_center_content(canvas, area, true);
         };
         let vertex =
             |(x, y, depth): (i32, i32, u16), u: u8, v: u8| Vertex3Tex::new(x, y, depth, u, v);
@@ -3794,7 +3965,7 @@ impl Desktop {
             canvas.width(),
             canvas.height(),
         ) else {
-            return self.paint_center_content(canvas, area);
+            return self.paint_center_content(canvas, area, true);
         };
         depth.clear(u16::MAX);
         let mut renderer = Renderer::new(canvas);
@@ -3997,10 +4168,18 @@ impl Desktop {
     /// ordinary flat 2D toast and, rendered once at local origin into an
     /// offscreen texture, as the source the 3D mode's perspective
     /// projection samples.
-    fn paint_toast_content(&self, toast: &Toast, canvas: &mut Canvas<'_>, area: Area) {
+    fn paint_toast_content(
+        &self,
+        toast: &Toast,
+        canvas: &mut Canvas<'_>,
+        area: Area,
+        background: bool,
+    ) {
         // Rounded, near-opaque card, matching the rest of the floating
         // chrome, instead of a hard-edged square outline.
-        fill_rounded_blended(canvas, area, CHROME_RADIUS_SMALL, theme_toast(), 235);
+        if background {
+            fill_rounded_blended(canvas, area, CHROME_RADIUS_SMALL, theme_toast(), 235);
+        }
         let text = core::str::from_utf8(&toast.text[..toast.length]).unwrap_or("");
         canvas.draw_text_system(area.x + 6, area.y + 8, text, theme_text());
     }
@@ -4010,7 +4189,7 @@ impl Desktop {
         if self.three_d {
             self.render_toast_3d(toast, canvas, area);
         } else {
-            self.paint_toast_content(toast, canvas, area);
+            self.paint_toast_content(toast, canvas, area, false);
         }
     }
 
@@ -4030,7 +4209,7 @@ impl Desktop {
             area.width as usize,
             area.height as usize,
         ) else {
-            return self.paint_toast_content(toast, canvas, area);
+            return self.paint_toast_content(toast, canvas, area, true);
         };
         texture.shade(|x, y| {
             blend(
@@ -4043,6 +4222,7 @@ impl Desktop {
             toast,
             &mut texture,
             Area::new(0, 0, area.width, area.height),
+            true,
         );
         // As in `render_qs_3d`: paint the (3D-projected) desktop background
         // before the depth buffer below is (re-)cleared, since
@@ -4067,7 +4247,7 @@ impl Desktop {
             camera.project(-half_width, half_height, 0),
             camera.project(half_width, half_height, 0),
         ) else {
-            return self.paint_toast_content(toast, canvas, area);
+            return self.paint_toast_content(toast, canvas, area, true);
         };
         let vertex =
             |(x, y, depth): (i32, i32, u16), u: u8, v: u8| Vertex3Tex::new(x, y, depth, u, v);
@@ -4082,7 +4262,7 @@ impl Desktop {
             canvas.width(),
             canvas.height(),
         ) else {
-            return self.paint_toast_content(toast, canvas, area);
+            return self.paint_toast_content(toast, canvas, area, true);
         };
         depth.clear(u16::MAX);
         let mut renderer = Renderer::new(canvas);
@@ -4165,6 +4345,10 @@ impl Desktop {
         if self.locked {
             let area = area.union(self.lock_card_area()).intersect(self.screen());
             painter.draw(area, |canvas| self.render_lock(canvas));
+            let cursor = self.cursor_area().intersect(area);
+            if !cursor.is_empty() {
+                painter.overlay(cursor, |canvas| self.render_cursor(canvas));
+            }
             return None;
         }
         painter.draw(area, |canvas| self.render_desktop(canvas));
@@ -4330,9 +4514,19 @@ impl Desktop {
         }
 
         if let Some(toast) = &self.toast {
-            let part = self.toast_area().intersect(area);
+            let toast_area = self.toast_area();
+            let part = toast_area.intersect(area);
             if !part.is_empty() {
-                painter.blend(part, theme_toast(), TOAST_OPACITY);
+                if self.three_d {
+                    painter.blend(part, theme_toast(), TOAST_OPACITY);
+                } else {
+                    painter.blend_rounded(
+                        toast_area,
+                        theme_toast(),
+                        TOAST_OPACITY,
+                        CHROME_RADIUS_SMALL,
+                    );
+                }
                 painter.overlay(part, |canvas| self.render_toast(toast, canvas));
             }
         }
@@ -4349,13 +4543,26 @@ impl Desktop {
 
         let qs = self.qs_area().intersect(area);
         if !qs.is_empty() {
-            painter.blend(qs, theme_panel(), PANEL_OPACITY);
+            if self.three_d {
+                painter.blend(qs, theme_panel(), PANEL_OPACITY);
+            } else {
+                painter.blend_rounded(self.qs_area(), theme_panel(), PANEL_OPACITY, CHROME_RADIUS);
+            }
             painter.overlay(qs, |canvas| self.render_qs(canvas));
         }
 
         let center = self.center_area().intersect(area);
         if !center.is_empty() {
-            painter.blend(center, theme_panel(), PANEL_OPACITY);
+            if self.three_d {
+                painter.blend(center, theme_panel(), PANEL_OPACITY);
+            } else {
+                painter.blend_rounded(
+                    self.center_area(),
+                    theme_panel(),
+                    PANEL_OPACITY,
+                    CHROME_RADIUS,
+                );
+            }
             painter.overlay(center, |canvas| self.render_center(canvas));
         }
 
@@ -4957,6 +5164,10 @@ impl Desktop {
         if self.locked {
             return match event {
                 InputEvent::Key(key) => self.lock_key(key),
+                InputEvent::PointerButton {
+                    button: 0,
+                    pressed: true,
+                } => self.login_pointer_press(),
                 _ => empty,
             };
         }
@@ -5122,41 +5333,6 @@ impl Desktop {
                     let overview = self.overview_area();
                     if !overview.contains(x, y) {
                         return self.toggle_launcher();
-                    }
-                    // A window card focuses that window and closes the
-                    // overview -- "open, search, launch, close; focus
-                    // restored" also covers picking an existing window.
-                    let card = self
-                        .entries()
-                        .enumerate()
-                        .find(|(index, _)| self.overview_thumb_area(*index).contains(x, y))
-                        .map(|(_, (slot, _))| slot);
-                    if let Some(slot) = card {
-                        let closed = self.toggle_launcher();
-                        return closed.union(self.focus(slot));
-                    }
-                    // A Dash icon focuses a running instance, or launches
-                    // one if none is running.
-                    let (dash_apps, dash_count) = self.dash_apps();
-                    let dash_hit = (0..dash_count)
-                        .find(|&index| self.overview_dash_area(index).contains(x, y))
-                        .map(|index| dash_apps[index]);
-                    if let Some(app_index) = dash_hit {
-                        let running = self
-                            .children
-                            .iter()
-                            .flatten()
-                            .find(|child| child.app == app_index)
-                            .and_then(|child| {
-                                self.windows
-                                    .iter()
-                                    .position(|window| window.is_some_and(|w| w.owner == child.pid))
-                            });
-                        if let Some(slot) = running {
-                            let closed = self.toggle_launcher();
-                            return closed.union(self.focus(slot));
-                        }
-                        return self.launch(app_index);
                     }
                     // An app grid cell launches it.
                     let (found, count) = self.filtered();
@@ -5359,6 +5535,7 @@ impl Desktop {
             x.clamp(0, self.desktop_width - 1),
             y.clamp(0, self.height - 1),
         );
+        self.pointer_visible = true;
         if self.locked {
             return Area::new(0, 0, 0, 0);
         }
@@ -5631,7 +5808,7 @@ impl Desktop {
 
 /// Read up to [`MAX_ACCOUNTS`] accounts from an accounts file into
 /// `accounts`, which starts empty; malformed lines are skipped.
-fn load_accounts(path: &str, accounts: &mut [Option<libwoven::accounts::Account>; MAX_ACCOUNTS]) {
+fn load_accounts(path: &str, accounts: &mut [Option<PublicAccount>; MAX_ACCOUNTS]) {
     let Ok(descriptor) = libwoven::open(path) else {
         return;
     };
@@ -5644,7 +5821,7 @@ fn load_accounts(path: &str, accounts: &mut [Option<libwoven::accounts::Account>
         if count == MAX_ACCOUNTS {
             break;
         }
-        if let Some(account) = libwoven::accounts::Account::parse(line) {
+        if let Some(account) = PublicAccount::parse(line) {
             accounts[count] = Some(account);
             count += 1;
         }
@@ -6031,7 +6208,7 @@ fn main(args: Args) -> ! {
             let pointer_before = (desktop.pointer, desktop.pointer_visible);
             let cursor_before = desktop.cursor_area();
             dirty.add(desktop.handle_input(event));
-            if pointer_before != (desktop.pointer, desktop.pointer_visible) && !desktop.locked {
+            if pointer_before != (desktop.pointer, desktop.pointer_visible) {
                 dirty.add(cursor_before);
                 dirty.add(desktop.cursor_area());
                 let (px, py) = desktop.pointer;

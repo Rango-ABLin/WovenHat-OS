@@ -187,6 +187,11 @@ impl TaskId {
 pub struct ProcessId(u64);
 
 impl ProcessId {
+    #[cfg(feature = "stage20-12-test")]
+    pub const fn from_u64(value: u64) -> Self {
+        Self(value)
+    }
+
     pub const fn as_u64(self) -> u64 {
         self.0
     }
@@ -770,6 +775,11 @@ pub struct Process {
     pub state: ProcessState,
     pub parent: ProcessId,
     pub credentials: Credentials,
+    /// Kernel identity-session membership inherited from the authenticated
+    /// parent. Userspace cannot set this field; logout clears it.
+    identity_session: Option<u64>,
+    /// Whether the inherited identity session is currently unlocked.
+    identity_active: bool,
     pub exit_code: i32,
     address_space: Option<userspace::AddressSpace>,
     /// Per-process file-descriptor table. Entries are handles into the
@@ -1682,6 +1692,9 @@ fn create_process(
     let mut inherited_group = None;
     let mut inherited_session = None;
     let mut inherited_environment = ProcessEnvironment::defaults();
+    let mut inherited_credentials = Credentials::USERSPACE;
+    let mut inherited_identity_session = None;
+    let mut inherited_identity_active = false;
     let fallback_group = current_process_group();
     let fallback_session = current_session_id();
     {
@@ -1692,6 +1705,9 @@ fn create_process(
             inherited_group = Some(parent_proc.process_group);
             inherited_session = Some(parent_proc.session_id);
             inherited_environment = parent_proc.environment;
+            inherited_credentials = parent_proc.credentials;
+            inherited_identity_session = parent_proc.identity_session;
+            inherited_identity_active = parent_proc.identity_active;
         }
     }
     let id = ProcessId(NEXT_PROCESS_ID.fetch_add(1, Ordering::Relaxed));
@@ -1700,7 +1716,9 @@ fn create_process(
         task_id,
         state: ProcessState::Ready,
         parent,
-        credentials: Credentials::USERSPACE,
+        credentials: inherited_credentials,
+        identity_session: inherited_identity_session,
+        identity_active: inherited_identity_active,
         exit_code: 0,
         address_space: Some(address_space),
         files: [None; MAX_FILE_DESCRIPTORS],
@@ -4245,6 +4263,18 @@ pub fn process_credentials(id: ProcessId) -> Option<Credentials> {
         .map(|process| process.credentials)
 }
 
+pub fn process_identity_session(id: ProcessId) -> Option<u64> {
+    process_table_lock()
+        .iter()
+        .flatten()
+        .find(|process| process.id == id && process.identity_active)
+        .and_then(|process| process.identity_session)
+}
+
+pub fn current_identity_session() -> Option<u64> {
+    process_identity_session(ProcessId(current_process_id()))
+}
+
 /// Replace the calling process's effective identity after a kernel identity
 /// authority has authenticated and owner-bound the session. This is crate
 /// visible so no userspace path can manufacture credentials; callers must not
@@ -4255,7 +4285,11 @@ pub fn process_credentials(id: ProcessId) -> Option<Credentials> {
     feature = "stage24-5-test",
     feature = "system-apps"
 ))]
-pub(crate) fn set_current_credentials(credentials: Credentials) -> bool {
+pub(crate) fn set_current_identity(
+    credentials: Credentials,
+    identity_session: Option<u64>,
+    identity_active: bool,
+) -> bool {
     let process_id = current_process_id();
     let mut processes = process_table_lock();
     let Some(process) = processes
@@ -4266,7 +4300,44 @@ pub(crate) fn set_current_credentials(credentials: Credentials) -> bool {
         return false;
     };
     process.credentials = credentials;
+    process.identity_session = identity_session;
+    process.identity_active = identity_active && identity_session.is_some();
     true
+}
+
+#[cfg(any(
+    feature = "stage20-12-test",
+    feature = "stage24-4-test",
+    feature = "stage24-5-test",
+    feature = "system-apps"
+))]
+pub(crate) fn set_identity_session_active(identity_session: u64, active: bool) {
+    let mut processes = process_table_lock();
+    for process in processes.iter_mut().flatten() {
+        if process.identity_session == Some(identity_session) {
+            process.identity_active = active;
+        }
+    }
+}
+
+/// Revoke one authenticated identity from every process that inherited it.
+/// This is a bounded PROCESS_TABLE update; it does not schedule or acquire an
+/// identity-authority lock and is therefore safe from owner-exit teardown.
+#[cfg(any(
+    feature = "stage20-12-test",
+    feature = "stage24-4-test",
+    feature = "stage24-5-test",
+    feature = "system-apps"
+))]
+pub(crate) fn revoke_identity_session(identity_session: u64) {
+    let mut processes = process_table_lock();
+    for process in processes.iter_mut().flatten() {
+        if process.identity_session == Some(identity_session) {
+            process.identity_session = None;
+            process.identity_active = false;
+            process.credentials = Credentials::USERSPACE;
+        }
+    }
 }
 
 pub fn may_ipc_with(receiver: u64) -> bool {
@@ -4445,6 +4516,8 @@ pub fn fork_current(frame: crate::syscall::UserForkFrame) -> Result<ProcessId, P
         state: ProcessState::Ready,
         parent: parent.id,
         credentials: parent.credentials,
+        identity_session: parent.identity_session,
+        identity_active: parent.identity_active,
         exit_code: 0,
         address_space: Some(cloned_address_space),
         files: child_files,
@@ -6835,15 +6908,16 @@ fn sandbox_file_access_for_task(target: TaskId, path: &str, write: bool) -> bool
 
 fn authorize_current_file_path(path: &str, write: bool) -> bool {
     let scope = wovenguard::classify_file_path(path);
-    let allowed = current_file_access_allowed(
-        if write {
-            Capability::FileWrite
-        } else {
-            Capability::FileRead
-        },
-        scope,
-        write,
-    );
+    let allowed = !crate::accounts::userspace_protected_path(path)
+        && current_file_access_allowed(
+            if write {
+                Capability::FileWrite
+            } else {
+                Capability::FileRead
+            },
+            scope,
+            write,
+        );
     let actor = current_process_id();
     crate::audit::record_detail(
         actor,
@@ -7449,7 +7523,9 @@ fn complete_process_termination(
     signal: u8,
 ) {
     // Remote/scheduler-driven termination bypasses exit_current_process(), so
-    // it needs the same Stage 10.3 async-owner reclamation guarantee.
+    // it needs the same Stage 10.3 async-owner reclamation guarantee. Identity
+    // authority is revoked before the scheduler request in signal_processes;
+    // taking its lower-ranked locks here would invert SCHEDULER -> identity.
     release_task_runtime_resources(task_id);
     // Mutate process-visible state and take ownership of the file table while
     // PROCESS_TABLE is held.  Every operation below can acquire another
@@ -7578,6 +7654,15 @@ pub fn child_count(parent: ProcessId) -> usize {
         .flatten()
         .filter(|process| process.parent == parent)
         .count()
+}
+
+#[cfg(feature = "stage20-12-test")]
+pub fn live_child(parent: ProcessId) -> Option<ProcessId> {
+    process_table_lock()
+        .iter()
+        .flatten()
+        .find(|process| process.parent == parent && process.state != ProcessState::Exited)
+        .map(|process| process.id)
 }
 
 /// Who is sending a signal. The kernel (its own self-tests, the kernel shell
@@ -7740,7 +7825,7 @@ fn signal_processes(pid: u64, sig: u64, sender: SignalSender) -> Result<(), File
             // state/stack hand-off boundary.
             process.pending_signal = sig;
             if process.state != ProcessState::Exited {
-                termination_requests.push((process.task_id, sig as u8));
+                termination_requests.push((process.task_id, process.id, sig as u8));
             }
         } else {
             process.pending_signal = sig;
@@ -7763,9 +7848,22 @@ fn signal_processes(pid: u64, sig: u64, sender: SignalSender) -> Result<(), File
         }
     }
     if !termination_requests.is_empty() {
+        // Revoke kernel identity before acquiring SCHEDULER. Besides closing
+        // the race for a final authenticated operation, this preserves the
+        // global lock order: identity bindings/authority rank below the
+        // scheduler and may themselves request scheduler-side credential
+        // invalidation after their guards are dropped.
+        #[cfg(any(
+            feature = "stage24-4-test",
+            feature = "stage24-5-test",
+            feature = "system-apps"
+        ))]
+        for (_, process_id, _) in &termination_requests {
+            crate::identity_runtime::release_owner(process_id.as_u64());
+        }
         {
             let mut scheduler = SCHEDULER.lock();
-            for (task_id, signal) in termination_requests {
+            for (task_id, _, signal) in termination_requests {
                 if let Some(cpu) = scheduler.request_termination(task_id, signal) {
                     reschedule_mask |= cpu_bit(cpu);
                 }

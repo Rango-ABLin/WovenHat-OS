@@ -170,7 +170,7 @@ fn capabilities() -> capability::CapabilitySet {
         .with(capability::Capability::StorageIo)
 }
 
-fn spawn(kind: ServiceKind) -> Result<task::ProcessId, task::ProcessError> {
+pub fn spawn(kind: ServiceKind) -> Result<task::ProcessId, task::ProcessError> {
     let capabilities = capabilities();
     match kind {
         ServiceKind::Package => spawn_one(

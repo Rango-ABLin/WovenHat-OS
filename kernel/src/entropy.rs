@@ -1,7 +1,8 @@
 //! WovenHat Stage 13.9R — split secure entropy from best-effort kernel randomness.
 //!
-//! The secure-pool prototype is compiled with its Wi-Fi stage consumers only.
-//! It has no production entropy source yet.
+//! The deterministic secure-pool fixture is compiled with its Wi-Fi stage
+//! consumers only. Production callers use RDRAND directly and fail closed
+//! when the instruction is unavailable or repeatedly fails.
 //!
 //! Security-sensitive callers use `fill_secure` / `snonce`. Those APIs fail
 //! closed unless a reviewed secure source has seeded the pool.
@@ -16,6 +17,43 @@ use x86_64::instructions::random::RdRand;
 
 #[cfg(feature = "stage13-9-test")]
 pub use secure::*;
+
+#[cfg(not(feature = "stage13-9-test"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EntropyError {
+    Unavailable,
+    InvalidRequest,
+}
+
+/// Fill a security-sensitive buffer exclusively from the CPU hardware random
+/// source. Unlike [`random_u64`], this function never falls back to timer or
+/// address mixing. A transiently unavailable source clears the whole output
+/// and fails closed so callers cannot accidentally consume partial material.
+#[cfg(not(feature = "stage13-9-test"))]
+pub fn fill_secure(out: &mut [u8]) -> Result<(), EntropyError> {
+    if out.is_empty() {
+        return Err(EntropyError::InvalidRequest);
+    }
+    out.fill(0);
+    let Some(rdrand) = RdRand::new() else {
+        return Err(EntropyError::Unavailable);
+    };
+    for chunk in out.chunks_mut(8) {
+        let mut value = None;
+        for _ in 0..8 {
+            if let Some(random) = rdrand.get_u64() {
+                value = Some(random);
+                break;
+            }
+        }
+        let Some(value) = value else {
+            out.fill(0);
+            return Err(EntropyError::Unavailable);
+        };
+        chunk.copy_from_slice(&value.to_le_bytes()[..chunk.len()]);
+    }
+    Ok(())
+}
 
 // The unseeded secure-pool candidate belongs to the Wi-Fi feature boundary.
 #[cfg(feature = "stage13-9-test")]

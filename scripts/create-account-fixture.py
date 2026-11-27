@@ -32,7 +32,11 @@ def main():
     path = pathlib.Path(sys.argv[1])
     if path.exists():
         raise SystemExit(f"Refusing to overwrite existing fixture: {path}")
-    digest = hashlib.sha256(bytes.fromhex("1122334455667788") + b"2468").hexdigest()
+    # Match libwoven::accounts; this is a disposable test account, not secure
+    # production provisioning or a credential-format migration tool.
+    digest = hashlib.pbkdf2_hmac(
+        "sha256", b"2468", bytes.fromhex("1122334455667788"), 100_000
+    ).hex()
     account = ACCOUNT_LINE.format(digest).encode("ascii")
 
     with path.open("xb") as disk:

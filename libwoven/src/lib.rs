@@ -2842,7 +2842,11 @@ pub mod graphics {
                             .ok_or(TrueTypeError::BadTableDirectory)?,
                     );
                     cursor += 1;
-                    if flag & 0x10 != 0 { value } else { -value }
+                    if flag & 0x10 != 0 {
+                        value
+                    } else {
+                        -value
+                    }
                 } else if flag & 0x10 != 0 {
                     0
                 } else {
@@ -2867,7 +2871,11 @@ pub mod graphics {
                             .ok_or(TrueTypeError::BadTableDirectory)?,
                     );
                     cursor += 1;
-                    if flag & 0x20 != 0 { value } else { -value }
+                    if flag & 0x20 != 0 {
+                        value
+                    } else {
+                        -value
+                    }
                 } else if flag & 0x20 != 0 {
                     0
                 } else {
@@ -19725,11 +19733,9 @@ mod tests {
             let mut canvas = Canvas::new(&mut pixels, 0, 0, 5, 5).unwrap();
             assert!(Renderer::new(&mut canvas).fill_path_antialiased(&path, Color::WHITE));
         }
-        assert!(
-            pixels
-                .iter()
-                .any(|pixel| *pixel != Color::BLACK.packed() && *pixel != Color::WHITE.packed())
-        );
+        assert!(pixels
+            .iter()
+            .any(|pixel| *pixel != Color::BLACK.packed() && *pixel != Color::WHITE.packed()));
     }
 
     #[test]
@@ -20120,7 +20126,7 @@ mod tests {
 
     #[test]
     fn tiling_covers_the_area_exactly_without_overlap() {
-        use layout::{Frame, MAX_TILES, tile};
+        use layout::{tile, Frame, MAX_TILES};
         let area = Frame::new(0, 0, 640, 376);
         assert_eq!(tile(0, area).1, 0);
         assert_eq!(tile(1, area).0[0], area, "one window takes everything");
@@ -20155,7 +20161,7 @@ mod tests {
 
     #[test]
     fn halves_split_the_area() {
-        use layout::{Frame, half};
+        use layout::{half, Frame};
         let area = Frame::new(0, 0, 641, 376);
         assert_eq!(half(area, false), Frame::new(0, 0, 320, 376));
         assert_eq!(half(area, true), Frame::new(320, 0, 321, 376));

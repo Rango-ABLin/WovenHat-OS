@@ -1,7 +1,7 @@
 #[path = "../kernel/src/update.rs"]
 mod update;
 
-use update::{BootDecision, Error, SlotState, UPDATE_RECORD_LEN, UpdateState};
+use update::{BootDecision, Error, SlotState, UpdateState, UPDATE_RECORD_LEN};
 
 #[test]
 fn candidate_activation_is_a_bounded_ab_transaction() {

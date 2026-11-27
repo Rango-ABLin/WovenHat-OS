@@ -1,0 +1,3 @@
+# Kernel modules are also included by edition-2024 host integration crates.
+# Use one style for shared files so workspace formatting is idempotent.
+style_edition = "2021"

@@ -3,7 +3,7 @@
 #[path = "../kernel/src/user_address.rs"]
 mod user_address;
 
-use user_address::{RangeError, USER_ADDRESS_LIMIT, check_user_range};
+use user_address::{check_user_range, RangeError, USER_ADDRESS_LIMIT};
 
 #[test]
 fn accepts_ranges_inside_user_space() {

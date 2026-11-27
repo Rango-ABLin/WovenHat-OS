@@ -1,6 +1,6 @@
 //! Bounded pixel decoders for the image asset boundary.
 
-use crate::media::{ImageError, ImageFormat, ImageMetadata, MAX_PIXELS, parse_image_header};
+use crate::media::{parse_image_header, ImageError, ImageFormat, ImageMetadata, MAX_PIXELS};
 use alloc::vec::Vec;
 use zune_core::bytestream::{ZByteIoError, ZByteReaderTrait, ZCursor, ZSeekFrom};
 use zune_core::colorspace::ColorSpace;
@@ -1272,10 +1272,10 @@ fn bytemuck_slice(output: &mut [u32]) -> &mut [u8] {
 #[cfg(test)]
 mod tests {
     use super::{
-        GifDisposal, GifFrameInfo, GifFrameSink, GifPlayback, ImageError, ImageStream, StreamError,
         decode_bmp_rgba_stream, decode_gif_animation_stream, decode_gif_rgba_stream,
         decode_png_rgba_stream, decode_webp_rgba, decode_webp_rgba_stream,
-        decode_webp_rgba_stream_bounded,
+        decode_webp_rgba_stream_bounded, GifDisposal, GifFrameInfo, GifFrameSink, GifPlayback,
+        ImageError, ImageStream, StreamError,
     };
     use crate::media::parse_image_header;
 

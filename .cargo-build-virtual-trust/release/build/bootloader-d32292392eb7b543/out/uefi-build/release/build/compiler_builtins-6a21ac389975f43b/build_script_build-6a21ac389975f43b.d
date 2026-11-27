@@ -1,0 +1,6 @@
+C:\Users\banda\WovenHat-OS\.cargo-build-virtual-trust\release\build\bootloader-d32292392eb7b543\out\uefi-build\release\build\compiler_builtins-6a21ac389975f43b\build_script_build-6a21ac389975f43b.d: C:\Users\banda\.rustup\toolchains\nightly-2026-07-10-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\compiler-builtins\compiler-builtins\build.rs C:\Users\banda\.rustup\toolchains\nightly-2026-07-10-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\compiler-builtins\compiler-builtins\..\libm\configure.rs
+
+C:\Users\banda\WovenHat-OS\.cargo-build-virtual-trust\release\build\bootloader-d32292392eb7b543\out\uefi-build\release\build\compiler_builtins-6a21ac389975f43b\build_script_build-6a21ac389975f43b.exe: C:\Users\banda\.rustup\toolchains\nightly-2026-07-10-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\compiler-builtins\compiler-builtins\build.rs C:\Users\banda\.rustup\toolchains\nightly-2026-07-10-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\compiler-builtins\compiler-builtins\..\libm\configure.rs
+
+C:\Users\banda\.rustup\toolchains\nightly-2026-07-10-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\compiler-builtins\compiler-builtins\build.rs:
+C:\Users\banda\.rustup\toolchains\nightly-2026-07-10-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\compiler-builtins\compiler-builtins\..\libm\configure.rs:

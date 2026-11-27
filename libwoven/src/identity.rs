@@ -6,7 +6,7 @@
 //! switch; the kernel must still authorize any effective-credential change
 //! and audit it before integrating this with task creation.
 
-use crate::accounts::{MAX_NAME, MAX_PIN, hash_pin};
+use crate::accounts::{hash_pin, MAX_NAME, MAX_PIN};
 
 pub const MAX_USERS: usize = 16;
 pub const MAX_GROUPS: usize = 16;
@@ -121,14 +121,6 @@ impl Credential {
         let candidate = hash_pin(&self.salt[..self.salt_len], password);
         let mut difference = 0u8;
         for (candidate, stored) in candidate.iter().zip(self.hash.iter()) {
-            difference |= candidate ^ stored;
-        }
-        difference == 0
-    }
-
-    fn verify_digest(&self, digest: &[u8; 32]) -> bool {
-        let mut difference = 0u8;
-        for (candidate, stored) in digest.iter().zip(self.hash.iter()) {
             difference |= candidate ^ stored;
         }
         difference == 0
@@ -506,6 +498,26 @@ impl Authority {
         ))
     }
 
+    /// Encode the public account-name directory without salts or verifier
+    /// material. One bounded ASCII name is emitted per line.
+    pub fn encode_public_users(&self, output: &mut [u8]) -> Result<usize, Error> {
+        let mut length = 0usize;
+        for user in self.users.iter().flatten() {
+            let name = &user.name[..user.name_len];
+            let end = length
+                .checked_add(name.len())
+                .and_then(|value| value.checked_add(1))
+                .ok_or(Error::Full)?;
+            if end > output.len() {
+                return Err(Error::Full);
+            }
+            output[length..length + name.len()].copy_from_slice(name);
+            output[length + name.len()] = b'\n';
+            length = end;
+        }
+        (length != 0).then_some(length).ok_or(Error::NotFound)
+    }
+
     /// Create a user only from an active, elevated administrator session.
     pub fn admin_add_user(
         &mut self,
@@ -728,42 +740,6 @@ impl Authority {
         self.open_session(user, password)
     }
 
-    /// Open a session after a trusted login manager has verified the PIN.
-    /// The authority still compares the supplied digest to its own record.
-    pub fn open_named_session_digest(
-        &mut self,
-        name: &[u8],
-        digest: &[u8; 32],
-    ) -> Result<SessionId, Error> {
-        let user = self
-            .users
-            .iter()
-            .flatten()
-            .find(|user| user.name[..user.name_len] == *name)
-            .ok_or(Error::NotFound)?;
-        if !user.credential.verify_digest(digest) {
-            return Err(Error::WrongPassword);
-        }
-        self.open_session_unchecked(user.id)
-    }
-
-    fn open_session_unchecked(&mut self, user: UserId) -> Result<SessionId, Error> {
-        let slot = self
-            .sessions
-            .iter()
-            .position(Option::is_none)
-            .ok_or(Error::Full)?;
-        let id = SessionId(self.next_session);
-        self.next_session = self.next_session.checked_add(1).ok_or(Error::Full)?;
-        self.sessions[slot] = Some(Session {
-            id,
-            user,
-            state: SessionState::Active,
-            elevated: false,
-        });
-        Ok(id)
-    }
-
     pub fn lock(&mut self, session: SessionId) -> Result<(), Error> {
         let session = self.find_session_mut(session).ok_or(Error::NotFound)?;
         session.state = SessionState::Locked;
@@ -778,21 +754,6 @@ impl Authority {
             .ok_or(Error::NotFound)?
             .credential
             .verify(password)
-        {
-            return Err(Error::WrongPassword);
-        }
-        let session = self.find_session_mut(session).ok_or(Error::NotFound)?;
-        session.state = SessionState::Active;
-        Ok(())
-    }
-
-    pub fn unlock_digest(&mut self, session: SessionId, digest: &[u8; 32]) -> Result<(), Error> {
-        let user = self.find_session(session).ok_or(Error::NotFound)?.user;
-        if !self
-            .find_user(user)
-            .ok_or(Error::NotFound)?
-            .credential
-            .verify_digest(digest)
         {
             return Err(Error::WrongPassword);
         }
@@ -1169,26 +1130,11 @@ pub fn session_open(name: &[u8], password: &[u8]) -> Result<SessionId, crate::Er
     .map(SessionId)
 }
 
-/// Open an account session using a digest verified by the trusted login
-/// manager. The kernel still compares it against its authority record.
-pub fn session_open_verified(name: &[u8], digest: &[u8; 32]) -> Result<SessionId, crate::Error> {
-    if name.is_empty() || name.len() > MAX_NAME {
-        return Err(crate::Error::Failed);
-    }
-    let mut packed = [0u8; 1 + MAX_NAME + 32];
-    packed[0] = name.len() as u8;
-    packed[1..1 + name.len()].copy_from_slice(name);
-    packed[1 + name.len()..1 + name.len() + 32].copy_from_slice(digest);
-    let length = 1 + name.len() + 32;
-    crate::check(unsafe {
-        crate::syscall::invoke(
-            crate::syscall::IDENTITY_OPEN_VERIFIED,
-            packed.as_ptr() as u64,
-            length as u64,
-            0,
-        )
-    })
-    .map(SessionId)
+/// Retired digest-replay entry point. Its ABI number remains reserved, but a
+/// credential verifier is not an authentication factor and cannot mint a
+/// session. Call [`session_open`] with the user's bounded plaintext PIN.
+pub fn session_open_verified(_name: &[u8], _digest: &[u8; 32]) -> Result<SessionId, crate::Error> {
+    Err(crate::Error::Failed)
 }
 
 pub fn session_lock(session: SessionId) -> Result<(), crate::Error> {
@@ -1225,18 +1171,12 @@ pub fn session_unlock(session: SessionId, password: &[u8]) -> Result<(), crate::
     session_password_action(crate::syscall::IDENTITY_UNLOCK, session, password)
 }
 
-pub fn session_unlock_verified(session: SessionId, digest: &[u8; 32]) -> Result<(), crate::Error> {
-    let mut packed = [0u8; 32];
-    packed.copy_from_slice(digest);
-    crate::check(unsafe {
-        crate::syscall::invoke(
-            crate::syscall::IDENTITY_UNLOCK_VERIFIED,
-            session.0,
-            packed.as_ptr() as u64,
-            packed.len() as u64,
-        )
-    })
-    .map(|_| ())
+/// Retired digest-replay unlock entry point; see [`session_open_verified`].
+pub fn session_unlock_verified(
+    _session: SessionId,
+    _digest: &[u8; 32],
+) -> Result<(), crate::Error> {
+    Err(crate::Error::Failed)
 }
 
 pub fn session_elevate(session: SessionId, password: &[u8]) -> Result<(), crate::Error> {
@@ -1464,6 +1404,13 @@ mod tests {
     }
 
     #[test]
+    fn verifier_digest_replay_entry_points_fail_closed() {
+        let digest = hash_pin(b"salt", b"1234");
+        assert!(session_open_verified(b"alice", &digest).is_err());
+        assert!(session_unlock_verified(SessionId(1), &digest).is_err());
+    }
+
+    #[test]
     fn ordinary_users_cannot_elevate_and_full_groups_do_not_partially_create() {
         let mut authority = Authority::new();
         let group = authority.add_group(b"users").unwrap();
@@ -1518,11 +1465,9 @@ mod tests {
             authority.change_password(b"ada", b"wrong", b"new-salt", b"5678"),
             Err(Error::WrongPassword)
         );
-        assert!(
-            authority
-                .change_password(b"ada", b"1234", b"new-salt", b"5678")
-                .is_ok()
-        );
+        assert!(authority
+            .change_password(b"ada", b"1234", b"new-salt", b"5678")
+            .is_ok());
         let session = authority.open_named_session(b"ada", b"5678").unwrap();
         assert_eq!(
             authority.open_named_session(b"ada", b"1234"),
@@ -1599,15 +1544,13 @@ mod tests {
         assert_eq!(user.name(), b"admin");
         assert!(user.administrator);
         assert_eq!(query.user(1), None);
-        assert!(
-            authority
-                .admin_query(
-                    session,
-                    ADMIN_QUERY_USERS,
-                    &mut [0; ADMIN_USER_RECORD_BYTES]
-                )
-                .is_err()
-        );
+        assert!(authority
+            .admin_query(
+                session,
+                ADMIN_QUERY_USERS,
+                &mut [0; ADMIN_USER_RECORD_BYTES]
+            )
+            .is_err());
     }
 
     #[test]

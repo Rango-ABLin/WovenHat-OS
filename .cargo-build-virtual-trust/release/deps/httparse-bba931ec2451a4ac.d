@@ -1,0 +1,11 @@
+C:\Users\banda\WovenHat-OS\.cargo-build-virtual-trust\release\deps\httparse-bba931ec2451a4ac.d: C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\httparse-1.10.1\src\lib.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\httparse-1.10.1\src\iter.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\httparse-1.10.1\src\macros.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\httparse-1.10.1\src\simd\mod.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\httparse-1.10.1\src\simd\swar.rs
+
+C:\Users\banda\WovenHat-OS\.cargo-build-virtual-trust\release\deps\libhttparse-bba931ec2451a4ac.rlib: C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\httparse-1.10.1\src\lib.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\httparse-1.10.1\src\iter.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\httparse-1.10.1\src\macros.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\httparse-1.10.1\src\simd\mod.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\httparse-1.10.1\src\simd\swar.rs
+
+C:\Users\banda\WovenHat-OS\.cargo-build-virtual-trust\release\deps\libhttparse-bba931ec2451a4ac.rmeta: C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\httparse-1.10.1\src\lib.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\httparse-1.10.1\src\iter.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\httparse-1.10.1\src\macros.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\httparse-1.10.1\src\simd\mod.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\httparse-1.10.1\src\simd\swar.rs
+
+C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\httparse-1.10.1\src\lib.rs:
+C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\httparse-1.10.1\src\iter.rs:
+C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\httparse-1.10.1\src\macros.rs:
+C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\httparse-1.10.1\src\simd\mod.rs:
+C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\httparse-1.10.1\src\simd\swar.rs:

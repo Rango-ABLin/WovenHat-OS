@@ -267,7 +267,7 @@ impl Response {
 
 #[cfg(test)]
 mod tests {
-    use super::{Operation, Request, Response, validate_plan};
+    use super::{validate_plan, Operation, Request, Response};
 
     #[test]
     fn request_round_trip_is_bounded() {

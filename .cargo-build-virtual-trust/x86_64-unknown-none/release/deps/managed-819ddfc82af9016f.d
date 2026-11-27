@@ -1,0 +1,11 @@
+C:\Users\banda\WovenHat-OS\.cargo-build-virtual-trust\x86_64-unknown-none\release\deps\managed-819ddfc82af9016f.d: C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\managed-0.8.0\src\lib.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\managed-0.8.0\src\object.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\managed-0.8.0\src\slice.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\managed-0.8.0\src\slotmap.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\managed-0.8.0\src\map.rs
+
+C:\Users\banda\WovenHat-OS\.cargo-build-virtual-trust\x86_64-unknown-none\release\deps\libmanaged-819ddfc82af9016f.rlib: C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\managed-0.8.0\src\lib.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\managed-0.8.0\src\object.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\managed-0.8.0\src\slice.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\managed-0.8.0\src\slotmap.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\managed-0.8.0\src\map.rs
+
+C:\Users\banda\WovenHat-OS\.cargo-build-virtual-trust\x86_64-unknown-none\release\deps\libmanaged-819ddfc82af9016f.rmeta: C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\managed-0.8.0\src\lib.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\managed-0.8.0\src\object.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\managed-0.8.0\src\slice.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\managed-0.8.0\src\slotmap.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\managed-0.8.0\src\map.rs
+
+C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\managed-0.8.0\src\lib.rs:
+C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\managed-0.8.0\src\object.rs:
+C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\managed-0.8.0\src\slice.rs:
+C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\managed-0.8.0\src\slotmap.rs:
+C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\managed-0.8.0\src\map.rs:

@@ -22,6 +22,7 @@ New-Item -ItemType Directory -Force -Path $env:CARGO_TARGET_DIR | Out-Null
 
 Write-Host "Cargo build dir: $env:CARGO_BUILD_BUILD_DIR"
 Write-Host "Cargo target dir: $env:CARGO_TARGET_DIR"
+Write-Host "Cargo offline mode: $env:CARGO_NET_OFFLINE"
 
 $auditRoot = Join-Path $outputRoot ('audit-artifacts/acceptance-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
 New-Item -ItemType Directory -Force -Path $auditRoot | Out-Null

@@ -5,6 +5,31 @@ use std::path::PathBuf;
 fn main() {
     println!("cargo:rerun-if-changed=../assets/wallpapers/manifest.toml");
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR missing"));
+    println!("cargo:rerun-if-env-changed=WOVENHAT_RECOVERY_IMAGE");
+    let recovery = env::var_os("WOVENHAT_RECOVERY_IMAGE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap())
+                .join("../target/system-apps")
+                .join(env!("CARGO_PKG_VERSION"))
+                .join("packages/woven-recovery.wapp")
+        });
+    println!("cargo:rerun-if-changed={}", recovery.display());
+    let recovery_expression = if recovery.is_file() {
+        format!(
+            "include_bytes!({:?})",
+            recovery
+                .canonicalize()
+                .expect("recovery image path")
+                .to_string_lossy()
+        )
+    } else {
+        // Existing lower-stage/system-apps builds remain compilable. A boot
+        // explicitly selecting maintenance rejects this absent image at runtime.
+        "&[]".into()
+    };
+    fs::write(out_dir.join("recovery-image.rs"), recovery_expression)
+        .expect("recovery image expression");
     const WIDTH: usize = 160;
     const HEIGHT: usize = 90;
     const ROW_BYTES: usize = (WIDTH * 3 + 3) & !3;

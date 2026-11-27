@@ -213,7 +213,7 @@ fn validate_source(source: &[u8]) -> Result<(), Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Error, NO_SLOT, Operation, Request, Response};
+    use super::{Error, Operation, Request, Response, NO_SLOT};
 
     #[test]
     fn stage_request_round_trip_is_bounded() {

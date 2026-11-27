@@ -5,7 +5,7 @@
 //! route events to the focused widget and decide when a damaged region is
 //! presented.
 
-use crate::{Canvas, InputEvent, Key, layout::Frame};
+use crate::{layout::Frame, Canvas, InputEvent, Key};
 
 /// Shared colors for the stock WovenUI theme.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1455,7 +1455,7 @@ mod tests {
         Button, Checkbox, DesignTokens, Dialog, ImageView, Label, ListBox, Menu, Navigation, Table,
         Tabs, TextField, Theme, Tree, VideoView, WebView, stack_vertical,
     };
-    use crate::{Canvas, InputEvent, Key, layout::Frame};
+    use crate::{layout::Frame, Canvas, InputEvent, Key};
 
     #[test]
     fn button_click_requires_press_and_release_inside() {

@@ -1,0 +1,2 @@
+cargo:rerun-if-changed=../assets/wallpapers/manifest.toml
+cargo:rustc-env=WOVENHAT_WALLPAPER_IMAGE=C:\Users\banda\WovenHat-OS\.cargo-build-virtual-trust\x86_64-unknown-none\release\build\wovenhat-kernel-296956cf1caeace3\out\wovenhat-wallpaper.bmp

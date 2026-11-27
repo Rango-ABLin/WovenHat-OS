@@ -26,6 +26,18 @@ pub const ADMISSION_DENIED: u64 = u64::MAX;
 pub const ADMISSION_NOT_IMPLEMENTED: u64 = u64::MAX - 2;
 
 static RECOVERY_BOOT_MODE: AtomicBool = AtomicBool::new(false);
+static READ_ONLY_BOOT: AtomicBool = AtomicBool::new(false);
+
+/// A selected maintenance boot permits only read-only recovery diagnostics.
+/// It does not satisfy destructive admission or grant any process capability.
+#[cfg(feature = "system-apps")]
+pub fn enter_read_only_boot() {
+    READ_ONLY_BOOT.store(true, Ordering::Release);
+}
+
+pub fn read_only_boot() -> bool {
+    READ_ONLY_BOOT.load(Ordering::Acquire)
+}
 
 /// Whether the boot path has authorized recovery operations.
 pub fn boot_mode_authorized() -> bool {

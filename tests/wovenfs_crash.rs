@@ -20,7 +20,7 @@ mod block;
 mod wfs;
 
 use block::{BlockDevice, Error as BlockError, SECTOR_SIZE};
-use wfs::{Error, MAX_FILE_SIZE, Volume};
+use wfs::{Error, Volume, MAX_FILE_SIZE};
 
 const SECTORS: usize = 192;
 const INODES: u32 = 32;

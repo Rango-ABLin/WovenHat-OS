@@ -2,6 +2,96 @@ WovenHat OS — Stage 10.7 → Version 1.0 Master Roadmap
 Phase I — Finish the asynchronous kernel foundation
 Stage 10.7 — Asynchronous TCP
 
+Boot/login/desktop directive — Phase A baseline accepted (2026-11-04)
+Runtime a980619e passes the prescribed Windows preservation gate, including
+60 memory/boot repetitions and Stage10.7 on 1/2/4 CPUs, plus Stage12.1–12.5
+QEMU matrices. Baseline host compilation, fixture KDF and mixed-edition
+formatting repairs are documented in docs/boot-login-desktop/. This closes
+inventory/baseline only. Next: Phase B boot failure/configuration qualification;
+no WovenInit/login/session/release completion is claimed.
+
+Boot/login/desktop directive — Phase C init/readiness accepted (2026-11-09)
+Phase B software/QEMU boot recovery is complete, with physical firmware/trust
+work deferred to the final hardware pass. Phase C replaces unordered essential
+service startup with a fixed package-rooted WovenInit dependency graph. Live
+owner-bound service publication is required before readiness; a bounded
+failure rolls back every graph process. Happy path and forced readiness
+failure pass at 1/2/4 CPUs, and the complete Windows preservation gate passes
+at `audit-artifacts/acceptance-20261109-131738-437`. Next: Phase D splash
+ownership and visual acceptance. No later login/session/release gate is
+claimed by this entry.
+
+Boot/login/desktop directive — Phase D splash accepted (2026-11-09)
+The existing early framebuffer renderer is retained. Kernel stages are labeled
+truthfully, timer deltas begin only after timer initialization, and the
+terminal-owned splash transitions to the owner-authorized WovenShell first
+frame through the existing exclusive compositor lease. Visual and source-bound
+acceptance passed on 1/2/4 CPUs; the complete Windows preservation chain passed
+at `audit-artifacts/acceptance-20261109-142532-913`. Next: Phase E
+authentication. This historical Phase D entry claims no later authority.
+
+Boot/login/desktop directive - Phase E authentication accepted (2026-11-10)
+The kernel is the credential-verification and session-minting authority.
+Credential salts require secure entropy and fail closed when RDRAND is absent;
+verifier-bearing account/WID2 records are hidden from userspace behind a public
+names-only catalog; digest-replay entry points are retired fail-closed while
+their ABI numbers remain reserved. Installer provisioning, missing-account
+desktop refusal, unknown/known-user rate limiting, sign-in/lock, PIN rotation,
+and identity ABI gates pass at 1/2/4 CPUs. The complete Windows preservation
+gate passes at `audit-artifacts/acceptance-20261110-123957-212`. Next: Phase F
+graphical login. Physical firmware/TPM/native qualification remains deferred.
+
+Boot/login/desktop directive - Phase F graphical login accepted (2026-11-10)
+WovenLogin remains a least-privilege pre-authentication surface inside
+WovenShell. It provides bounded account selection, masked PIN entry, keyboard
+and pointer navigation, visible failure handling, high-contrast controls, and
+power/restart actions through the existing ABI. Successful submission reaches
+the kernel authentication authority rather than a shell-local shortcut.
+Focused login and lock acceptance passes at 1/2/4 CPUs, the normal and
+high-contrast frames pass the unchanged visual/performance budgets, and the
+complete Windows preservation gate passes at
+`audit-artifacts/acceptance-20261110-172935-815`. Next: Phase G session
+management. Physical firmware/TPM/native qualification remains deferred.
+
+Boot/login/desktop directive - Phase G session management accepted (2026-11-11)
+Kernel-only session membership now accompanies authenticated credentials across
+spawn and fork. The production shell cannot launch applications before
+authentication; lock suspends inherited session authority, valid unlock
+restores it, and logout revokes every inherited credential before closing the
+token and terminating tracked children. Natural and remote owner teardown both
+release identity bindings. The strengthened graphical journey passes at
+1/2/4 CPUs, and the complete Windows preservation gate passes at
+`audit-artifacts/acceptance-20261111-032505-125`. Next: Phase H WovenShell
+integration. Physical firmware/TPM/native qualification remains deferred.
+
+Boot/login/desktop directive - Phase H WovenShell integration accepted (2026-11-12)
+The authenticated production desktop now provides the directive's bottom
+taskbar, bounded WovenStart/search, application/window/input integration,
+corrected rounded/translucent rendering and readiness signaling. Stage
+20.1-20.4, production Stage 20.15 and the preserved Stage 20.12 authenticated
+session journey pass at 1/2/4 CPUs. The complete Windows preservation chain
+passes at `audit-artifacts/acceptance-20261112-153757-168`. Next: Phase I
+full-system integration. Physical firmware/TPM/native qualification remains
+deferred.
+
+Boot/login/desktop directive - Phase I full-system integration accepted (2026-11-12)
+Two-cycle authenticated session teardown, warm reboot, service crash/restart,
+WovenInit failure rollback, installed WovenFS persistence, abrupt-shutdown
+recovery and input isolation pass on 1/2/4 CPUs. Remote termination now revokes
+identity authority before scheduler acquisition, eliminating an observed lock
+inversion and final-operation race. The complete Windows preservation chain
+passes at `audit-artifacts/acceptance-20261112-164814-197`. Next: Phase J
+release-candidate packaging. Physical firmware/TPM/native qualification remains
+deferred.
+
+Boot/login/desktop B1 strict configuration accepted (2026-11-04)
+Runtime aaeaaf8f rejects invalid configuration before ExitBootServices, with
+preallocation bounds and valid legacy/version-1 compatibility. All 27 actual
+UEFI cases and existing signed-handoff gates pass at 1/2/4 CPUs; the full
+Windows preservation chain also passes. This is the logging/framebuffer
+configuration subset only. Next: Phase B kernel-image failure qualification;
+the complete Phase B gate and production trust chain remain open.
+
 Stage 24.59 - Deterministic Change-PIN acceptance
 Accepted the complete desktop PIN-rotation path: one kernel-owned salt is
 shared by the identity authority and durable account record, the old PIN is
@@ -1945,3 +2035,11 @@ source/evidence provenance, stronger completed-frame pixel assertions,
 close-time repaint recovery, and validation limits. This closes software
 desktop acceptance, not native GPU/HID, accelerated 3D, GFX-08, the whole
 graphics mandate or the full historical Windows acceptance chain.
+
+
+Boot/login/desktop B2 bounded kernel image validation accepted (2026-11-04)
+Runtime 72be85aa passes all 45 UEFI positive/rejection cases on 1/2/4 CPUs,
+software signed-handoff and full Windows preservation (60 memory repetitions,
+network and isolated Stage10.4-10.7). Host tests and warning-denying Clippy pass.
+No mapper/BootInfo/authority change. Full Phase B remains open for remaining
+boot policy and I/O/resource/graphics/firmware failure and trust qualification.

@@ -3660,6 +3660,8 @@ Passes on 1/2/4 CPUs with exit 33. Evidence:
 `target/stage32-17-gdb-entry-{1,2,4}cpu/`. Target (stage32-17-test and
 stage32-12-test) and host warning-denying Clippy pass. No intermediate live
 GDB client needed; the stub loop timeout path is sufficient for gate acceptance.
+Re-verified 2026-11-05 via `scripts/test-stage32-17-idt-trap.py` (1/2/4 CPUs,
+exit 33).
 
 ## Stage 32.12 GDB trap-stop boundary QEMU gate - 2026-10-28 - ACCEPTED
 
@@ -15378,6 +15380,21 @@ At final inspection QEMU PID 17040 had exited; RUN-DESKTOP.ps1 relaunches it.
 RUN-DESKTOP.ps1 defaults to WHPX, accepts -Accelerator tcg and boots a private
 read-only image snapshot. This focused repair is not full Stage 20/32 or full
 historical Windows acceptance; the seven failed graphics gates need follow-up.
+## Stage 32.19 live GDB COM2 client qualification — 2026-11-06 — ACCEPTED
+
+A real RSP exchange over QEMU COM2 (TCP-backed second serial port). The kernel
+spawns a scheduler-owned `gdb-live-test` task that fires INT3; the Python
+harness connects via TCP, polls until `S05` arrives, sends `c` (continue), and
+the task stores `HANDLER_FIRED` into `LIVE_TASK_DONE` before yielding forever.
+The main boot loop polls `live_task_done()` and writes the acceptance marker.
+No new kernel source; feature `stage32-19-test = ["qemu-test", "gdb-entry"]`
+was already defined. Script: `scripts/test-stage32-19-live-gdb.py`.
+
+Passes on 1/2/4 CPUs with exit 33. Evidence:
+`target/stage32-19-live-gdb-{1,2,4}cpu/`. Host warning-denying Clippy and
+212 libwoven tests pass. Live GDB detach (32.20), kill (32.21), and register
+read (32.22) remain open.
+
 ## Stage 32.18 GDB owner/binding attachment QEMU gate - 2026-10-28 - ACCEPTED
 
 The owner/binding boot self-test now exercises same-task token reuse,
@@ -15389,6 +15406,8 @@ pass. QEMU passes with the required marker at 1, 2, and 4 CPUs (exit 33).
 Evidence: `target/stage32-18-gdb-owner-binding-1cpu-1cpu-debug`,
 `target/stage32-18-gdb-owner-binding-2cpu-2cpu-debug`, and
 `target/stage32-18-gdb-owner-binding-4cpu-4cpu-debug`.
+Re-verified 2026-11-05 via `scripts/test-stage32-18-gdb-owner.py`; evidence
+`target/stage32-18-gdb-owner-binding-{1,2,4}cpu/` (exit 33).
 
 ## Stage 12.2 WovenFS extended attributes — 2026-10-28 — ACCEPTED
 

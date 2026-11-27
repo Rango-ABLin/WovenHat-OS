@@ -276,6 +276,32 @@ def wait_marker(
     raise GateFailure(f"timed out waiting for marker {marker!r} for {phase}")
 
 
+def wait_markers_after(
+    serial: Path,
+    offset: int,
+    markers: tuple[str, ...],
+    deadline: float,
+    process: subprocess.Popen[Any],
+) -> None:
+    """Wait for ordered markers emitted after a specific input action."""
+    cursor = offset
+    marker_index = 0
+    while time.monotonic() < deadline:
+        text = read_serial(serial)
+        while marker_index < len(markers):
+            found = text.find(markers[marker_index], cursor)
+            if found < 0:
+                break
+            cursor = found + len(markers[marker_index])
+            marker_index += 1
+        if marker_index == len(markers):
+            return
+        if process.poll() is not None:
+            raise GateFailure(f"QEMU exited before ordered markers {markers!r}")
+        time.sleep(0.05)
+    raise GateFailure(f"timed out waiting for ordered markers {markers!r}")
+
+
 def capture_frame(qmp: Qmp, path: Path, deadline: float, timings: dict[str, float], label: str) -> tuple[int, int, bytes]:
     started = time.monotonic()
     qmp.screendump(path)
@@ -1144,6 +1170,7 @@ def main(argv: list[str] | None = None) -> int:
             "desktop_session_startup_ms": args.max_startup_ms,
             "desktop_ready_ms": args.max_startup_ms,
             "sign_in_input_ms": args.max_input_ms,
+            "woven_login_high_contrast_input_ms": args.max_input_ms,
             "keyboard_input_ms": args.max_input_ms,
             "mouse_click_input_ms": args.max_input_ms,
             "files_pointer_cancel_ms": args.max_input_ms,
