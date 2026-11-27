@@ -244,6 +244,7 @@ fn main() {
         valid_package(&package),
         "packager emitted an invalid WPKG envelope"
     );
+    eprintln!("[WPKG] writing artifact");
     fs::write(&output, &package).expect("failed to write WPKG package");
     println!(
         "signed {} -> {} ({} bytes)",
