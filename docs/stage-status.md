@@ -1,5 +1,13 @@
 # Stage status
 
+## WovenShell bottom taskbar stabilization - 2026-11-28
+
+Quick Settings, Notification Center and Start defer the auto-hide state
+transition while open. The frame clock hides and invalidates the strip after
+the panel closes if the hold has expired. The pin and layout QEMU harnesses
+target the compact icon widths and spacing. All 13 standalone taskbar model
+tests pass. The serialized 1/2/4-CPU QEMU acceptance remains pending.
+
 ## WovenInit production boot-path repair - 2026-11-27 - ACCEPTED (BOUNDED QEMU)
 
 Normal boot had stopped calling `woven_init::start()`, so the strict

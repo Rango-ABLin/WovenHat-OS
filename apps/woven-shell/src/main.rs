@@ -5858,7 +5858,8 @@ impl Desktop {
         // Auto-hide: past the hold, the bar goes back down. Panels that hang
         // off the strip (Quick Settings, Notification Center, the overview)
         // hold it up until they close.
-        if self.auto_hide.tick(now) && !self.qs_open && !self.center_open && !self.launcher_open {
+        let panel_open = self.qs_open || self.center_open || self.launcher_open;
+        if self.auto_hide.tick(now, panel_open) {
             log(&[b"woven-shell: taskbar hidden"]);
             dirty = dirty.union(self.taskbar());
         }

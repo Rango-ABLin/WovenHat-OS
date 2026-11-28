@@ -97,14 +97,14 @@ assert _spec.loader is not None
 _spec.loader.exec_module(dq)
 
 # Logical pointer space and the shell's taskbar constants (tokens.rs /
-# main.rs): bar height 24, Start button 58 wide, medium entries 48 wide,
-# 4 px gaps, Start-to-entries padding 8.
+# main.rs): bar height 24, Start button 58 wide, medium entries 40 wide,
+# 2 px gaps, Start-to-entries padding 8.
 LOGICAL_WIDTH = 640
 LOGICAL_HEIGHT = 400
 BAR_HEIGHT = 24
 START_WIDTH = 58
-ENTRY_WIDTH = 48
-ENTRY_GAP = 4
+ENTRY_WIDTH = 40
+ENTRY_GAP = 2
 # The taskbar strip in physical scanout pixels (the framebuffer is the
 # logical desktop at 2x).
 STRIP_TOP = 800 - 2 * BAR_HEIGHT

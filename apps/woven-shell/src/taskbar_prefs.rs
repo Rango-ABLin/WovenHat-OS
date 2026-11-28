@@ -160,9 +160,10 @@ impl AutoHide {
         false
     }
 
-    /// The frame-clock tick. Returns whether visibility changed.
-    pub fn tick(&mut self, now: u64) -> bool {
-        if !self.enabled || self.hidden || now <= self.until {
+    /// The frame-clock tick. Open taskbar panels defer hiding until they close.
+    /// Returns whether visibility changed.
+    pub fn tick(&mut self, now: u64, panel_open: bool) -> bool {
+        if panel_open || !self.enabled || self.hidden || now <= self.until {
             return false;
         }
         self.hidden = true;

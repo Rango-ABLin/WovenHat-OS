@@ -191,11 +191,10 @@ def main(argv: list[str] | None = None) -> int:
 
             # Left alignment places the Start button at logical x=8. The Start
             # button is 58x16 at y=bar_top+4; sample an interior point in
-            # physical pixels. The centered default would place Start near
-            # logical x=106 for 3 medium pins, leaving the left area as bar bg.
+            # physical pixels.
             controls_left = 358
-            entry_width = {"small": 40, "medium": 48, "large": 56}[args.icon_size]
-            group_width = 58 + 8 + 3 * entry_width + 2 * 4
+            entry_width = {"small": 32, "medium": 40, "large": 48}[args.icon_size]
+            group_width = 58 + 8 + 3 * entry_width + 2 * 2
             expected_start = (
                 8
                 if args.alignment == "left"

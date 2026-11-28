@@ -7,11 +7,21 @@ mod taskbar_prefs;
 use taskbar_prefs::{Alignment, AutoHide, IconSize, TaskbarPrefs, AUTO_HIDE_HOLD};
 
 #[test]
+fn open_panel_defers_hiding_until_it_closes() {
+    let mut state = AutoHide::from_setting(Some("true"));
+    assert!(state.pointer(399, 399, 376, 0, AUTO_HIDE_HOLD));
+    assert!(!state.tick(AUTO_HIDE_HOLD + 1, true));
+    assert!(!state.is_hidden());
+    assert!(state.tick(AUTO_HIDE_HOLD + 2, false));
+    assert!(state.is_hidden());
+}
+
+#[test]
 fn defaults_are_centered_and_medium() {
     let prefs = TaskbarPrefs::DEFAULT;
     assert_eq!(prefs.alignment, Alignment::Center);
     assert_eq!(prefs.icon_size, IconSize::Medium);
-    assert_eq!(prefs.icon_size.entry_width(), 48);
+    assert_eq!(prefs.icon_size.entry_width(), 40);
 }
 
 #[test]
@@ -19,7 +29,7 @@ fn recognized_values_are_applied() {
     let prefs = TaskbarPrefs::from_values(Some("left"), Some("large"));
     assert_eq!(prefs.alignment, Alignment::Left);
     assert_eq!(prefs.icon_size, IconSize::Large);
-    assert_eq!(prefs.icon_size.entry_width(), 56);
+    assert_eq!(prefs.icon_size.entry_width(), 48);
 }
 
 #[test]
@@ -67,7 +77,7 @@ fn auto_hide_off_never_hides() {
     let mut state = AutoHide::off();
     // Pointer anywhere, ticks forever: a disabled bar can never change.
     assert!(!state.pointer(399, 399, 376, 1_000, AUTO_HIDE_HOLD));
-    assert!(!state.tick(10_000));
+    assert!(!state.tick(10_000, false));
     assert!(!state.is_hidden());
 }
 
@@ -81,10 +91,10 @@ fn auto_hide_reveals_on_edge_and_hides_after_hold() {
     assert!(state.pointer(399, 399, 376, 100, AUTO_HIDE_HOLD));
     assert!(!state.is_hidden());
     // Before the hold expires: stays revealed.
-    assert!(!state.tick(199));
+    assert!(!state.tick(199, false));
     assert!(!state.is_hidden());
     // Past the hold: hides again.
-    assert!(state.tick(201));
+    assert!(state.tick(201, false));
     assert!(state.is_hidden());
 }
 
@@ -95,12 +105,12 @@ fn auto_hide_pointer_in_strip_refreshes_the_hold() {
     // A position inside the strip pushes the deadline out.
     assert!(!state.pointer(380, 399, 376, 150, AUTO_HIDE_HOLD));
     // Past the ORIGINAL deadline but not the refreshed one: stays up.
-    assert!(!state.tick(201));
+    assert!(!state.tick(201, false));
     assert!(!state.is_hidden());
-    assert!(!state.tick(250));
+    assert!(!state.tick(250, false));
     assert!(!state.is_hidden());
     // Past the refreshed deadline: hides again.
-    assert!(state.tick(251));
+    assert!(state.tick(251, false));
     assert!(state.is_hidden());
 }
 
@@ -110,7 +120,7 @@ fn auto_hide_pointer_above_strip_lets_the_hold_run_out() {
     assert!(state.pointer(399, 399, 376, 100, AUTO_HIDE_HOLD));
     // Moving up out of the strip does not refresh anything.
     assert!(!state.pointer(200, 399, 376, 140, AUTO_HIDE_HOLD));
-    assert!(state.tick(140 + AUTO_HIDE_HOLD));
+    assert!(state.tick(140 + AUTO_HIDE_HOLD, false));
     assert!(state.is_hidden());
 }
 

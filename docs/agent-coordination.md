@@ -12136,3 +12136,36 @@ sequential TCP clients and FIN/EOF. Evidence:
 The physical/trust preflight remained correctly not qualified without external
 OVMF VARS, swtpm, sbverify, disk and development-key inputs. QEMU/output lane
 ownership is released.
+## Codex - current-source Stage 31 and WovenWeb closure (2026-11-28) - ACTIVE
+
+At the owner's explicit request, validating the current combined dirty tree in
+dependency order. The exact full Windows kernel preservation gate already
+passed under `acceptance-20261127-183839-305`. This reservation now owns the
+serialized QEMU/output lane for fresh Stage 31 1/2/4/8/16-CPU acceptance and
+then the complete WovenWeb VM/memory/network/C++ 1/2/4-CPU matrix. Preflight
+found no QEMU, Cargo, rustc or acceptance PowerShell process. Existing
+concurrent source changes are preserved; no assertion, timeout or feature
+requirement will be weakened.
+
+## Codex - native storage-driver lifecycle completion (2026-11-28) - BLOCKED
+
+Audited the user's native NVMe, SATA and USB completion request without source
+edits. The exact current head has a recorded failing Stage 10.7 desktop gate
+(the 1-CPU real-QEMU qualification failed its client-region framebuffer
+assertion), while the master roadmap forbids later-stage work until the current
+acceptance gate passes. An active latest-image repair also reserves
+`kernel/src/xhci.rs`, and an active P0 owner controls serialized QEMU acceptance.
+The existing drivers are functional under QEMU, but their recorded open native
+boundaries remain NVMe/AHCI interrupt completion, recovery/hot removal and
+physical qualification. USB physical qualification likewise remains open.
+No driver, assertion, timeout, hardware, USB media or acceptance artifact was
+changed. Resume only after Stage 10.7 passes on the exact head and the xHCI/QEMU
+reservations are released; destructive physical-device qualification still
+requires exact device identity and explicit authorization.
+
+## Codex - bottom taskbar stabilization (2026-11-28)
+
+Fixed panel-held auto-hide and updated the taskbar layout and pin harnesses
+for compact icon geometry. All 13 standalone taskbar host tests pass.
+The active Stage 31/WovenWeb owner retains the serialized QEMU lane.
+Taskbar QEMU acceptance remains pending. Shell source reservation released.
