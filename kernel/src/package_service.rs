@@ -230,6 +230,10 @@ fn prepare_rollback(
         Ok(length) => {
             let previous = libwoven::store::Store::decode_record(&previous_record[..length])
                 .map_err(Error::Catalog)?;
+            // Retire the previous snapshot before reclaiming any chunks it
+            // references. A crash during cleanup can leave orphan chunks,
+            // but must not leave a published rollback target with holes.
+            write_catalog(authority, PREVIOUS_CATALOG_PATH, current, now)?;
             for index in 0..libwoven::store::MAX_INSTALLED {
                 let Some(entry) = previous.entry_at(index) else {
                     continue;
@@ -256,6 +260,7 @@ fn prepare_rollback(
                     );
                 }
             }
+            return Ok(());
         }
         Err(crate::wfs::Error::NotFound) => {}
         Err(_) => return Err(Error::Storage),
@@ -344,11 +349,13 @@ pub fn recover(
     let mut rollback_record =
         crate::heap::try_filled(0u8, libwoven::store::MAX_RECORD_BYTES).ok_or(Error::Storage)?;
     let mut rollback_probe = crate::heap::try_filled(0u8, ROLLBACK_BYTES).ok_or(Error::Storage)?;
+    let mut recovered = *current;
     match crate::wfs::read_vfs_path_durable(ROLLBACK_PATH, &mut rollback_probe) {
         Ok(_) => {
             let target = read_rollback_intent(&mut rollback_record)?;
             restore_previous(authority, current, &target, now)?;
             clear_rollback(authority, now);
+            recovered = target;
         }
         Err(crate::wfs::Error::NotFound) => {}
         Err(_) => return Err(Error::Storage),
@@ -356,72 +363,38 @@ pub fn recover(
     let mut bytes = crate::heap::try_filled(0u8, JOURNAL_BYTES).ok_or(Error::Storage)?;
     let length = match crate::wfs::read_vfs_path_durable(JOURNAL_PATH, &mut bytes) {
         Ok(length) => length,
-        Err(crate::wfs::Error::NotFound) => return Ok(*current),
+        Err(crate::wfs::Error::NotFound) => return Ok(recovered),
         Err(_) => return Err(Error::Storage),
     };
     let Some(journal) = decode_journal(&bytes[..length]) else {
-        clear_journal(authority, now);
         return Err(Error::Storage);
     };
     let name = journal_name(&journal)?;
-    let current_version = current.entry(name.as_bytes()).map(|entry| entry.version);
-    let install_current = current_version == Some(journal.version);
+    let current_version = recovered.entry(name.as_bytes()).map(|entry| entry.version);
+    // The previous catalog retains the old chunks for rollback. Only an
+    // unpublished install owns chunks that recovery can discard here.
     if matches!(
         journal.state,
         JOURNAL_INSTALL_PREPARED | JOURNAL_INSTALL_COMMITTED
-    ) {
-        if install_current {
-            remove_chunks(
-                APPLICATION_DIRECTORY,
-                name,
-                journal.old_version,
-                journal.old_application_chunks as usize,
-                now,
-            );
-            remove_chunks(
-                RESOURCE_DIRECTORY,
-                name,
-                journal.old_version,
-                journal.old_resource_chunks as usize,
-                now,
-            );
-        } else {
-            remove_chunks(
-                APPLICATION_DIRECTORY,
-                name,
-                journal.version,
-                journal.application_chunks as usize,
-                now,
-            );
-            remove_chunks(
-                RESOURCE_DIRECTORY,
-                name,
-                journal.version,
-                journal.resource_chunks as usize,
-                now,
-            );
-        }
-    } else if journal.state == JOURNAL_REMOVE_PREPARED && current_version == Some(journal.version) {
-        // The catalog has not committed the removal yet; the old payload is
-        // still authoritative and must survive recovery.
-    } else {
+    ) && current_version != Some(journal.version)
+    {
         remove_chunks(
             APPLICATION_DIRECTORY,
             name,
             journal.version,
-            journal.old_application_chunks as usize,
+            journal.application_chunks as usize,
             now,
         );
         remove_chunks(
             RESOURCE_DIRECTORY,
             name,
             journal.version,
-            journal.old_resource_chunks as usize,
+            journal.resource_chunks as usize,
             now,
         );
     }
     clear_journal(authority, now);
-    Ok(*current)
+    Ok(recovered)
 }
 
 fn write_chunks(
@@ -579,24 +552,10 @@ fn install_recovered(
     let mut record =
         crate::heap::try_filled(0u8, libwoven::store::MAX_RECORD_BYTES).ok_or(Error::Storage)?;
     let length = updated.encode_record(&mut record).map_err(Error::Catalog)?;
-    if crate::wfs::write_vfs_path_durable(authority, CATALOG_PATH, &record[..length], now).is_err()
-    {
-        remove_chunks(
-            APPLICATION_DIRECTORY,
-            name,
-            package.manifest.version,
-            application_chunks,
-            now,
-        );
-        remove_chunks(
-            RESOURCE_DIRECTORY,
-            name,
-            package.manifest.version,
-            resource_chunks,
-            now,
-        );
-        return Err(Error::Storage);
-    }
+    // A failed durable write may leave publication ambiguous. Keep the
+    // intent and chunks so recovery can decide from the durable catalog.
+    crate::wfs::write_vfs_path_durable(authority, CATALOG_PATH, &record[..length], now)
+        .map_err(|_| Error::Storage)?;
     let committed = InstallJournal {
         state: JOURNAL_INSTALL_COMMITTED,
         ..journal
@@ -883,6 +842,22 @@ pub fn update_remove_self_test() -> bool {
         return false;
     };
     if updated.contains(b"core") || rollback(&authority, &updated, 3).is_err() {
+        return false;
+    }
+    // Cut after the rollback intent becomes durable, before catalog replay.
+    // The next transaction must start from the restored generation.
+    let Ok(removed_again) = remove(&authority, &current, b"core", 4) else {
+        return false;
+    };
+    if write_rollback_intent(&authority, &current, 5).is_err() {
+        return false;
+    }
+    let Ok(replayed) = recover(&authority, &removed_again, 6) else {
+        return false;
+    };
+    if !replayed.contains(b"core")
+        || !recover(&authority, &replayed, 7).is_ok_and(|store| store.contains(b"core"))
+    {
         return false;
     }
     let mut application = [0u8; crate::wfs::MAX_FILE_SIZE];

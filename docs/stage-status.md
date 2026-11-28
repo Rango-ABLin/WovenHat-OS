@@ -1,5 +1,20 @@
 # Stage status
 
+## Package rollback replay - 2026-11-28
+
+Recovery returns the replayed catalog to the next package transaction and
+preserves payloads referenced by the previous catalog. An ambiguous catalog
+write retains the durable intent and chunks for replay. Stage 21.9 target
+Clippy passes. The new rollback interruption case awaits QEMU execution.
+A/B bootloader handoff and installed power-loss recovery remain open.
+
+## WovenStore and WovenUpdate client waits - 2026-11-28
+
+The normal CLI and GUI broker calls wait on the existing IPC message event
+with a 30-second deadline. Missing replies after successful submission
+report an unknown transaction outcome. Both app target Clippy gates and
+six standalone app tests passed. QEMU transaction acceptance remains open.
+
 ## WovenFiles refresh framebuffer - 2026-11-28
 
 WovenFiles displays its session refresh count beside the Refresh button.

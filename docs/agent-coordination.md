@@ -12191,3 +12191,18 @@ baseline after workspace cancellation and checks the counter's client region
 after keyboard refresh. All ten Python harness tests pass. Fresh desktop QEMU
 acceptance remains pending while the shared lane is reserved. Source
 reservation released.
+
+## Codex - package and update client completion (2026-11-28)
+
+WovenStore and WovenUpdate now use the existing message wait with a
+30-second deadline. A missing reply after a successful send reports an
+unknown outcome. Freestanding Clippy and six standalone app tests pass.
+QEMU acceptance pending while the shared lane is reserved.
+Source reservation released.
+
+## Codex - package recovery catalog replay (2026-11-28)
+
+Package recovery returns the replayed catalog and preserves rollback
+payloads across install/removal recovery and ambiguous catalog writes.
+Stage 21.9 target Clippy passes. Its new rollback-intent replay case still
+needs the serialized QEMU gate. Source reservation released.
