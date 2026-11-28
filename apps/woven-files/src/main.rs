@@ -144,7 +144,15 @@ fn draw_files(
     view.new.draw(canvas, THEME);
     view.delete.draw(canvas, THEME);
     view.rename.draw(canvas, THEME);
-    let _ = refresh_count;
+    let mut digits = [0; 10];
+    let count = libwoven::format_u64(u64::from(refresh_count), &mut digits);
+    canvas.draw_text_system(174, BUTTON_Y + 5, "Refreshes:", THEME.disabled);
+    canvas.draw_text_system(
+        258,
+        BUTTON_Y + 5,
+        core::str::from_utf8(count).unwrap_or("?"),
+        THEME.text,
+    );
     view.refresh.draw(canvas, THEME);
     if let Some((x, y)) = pointer {
         let color = if pressed { THEME.text } else { POINTER_MARKER };

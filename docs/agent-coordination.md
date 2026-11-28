@@ -12169,3 +12169,25 @@ Fixed panel-held auto-hide and updated the taskbar layout and pin harnesses
 for compact icon geometry. All 13 standalone taskbar host tests pass.
 The active Stage 31/WovenWeb owner retains the serialized QEMU lane.
 Taskbar QEMU acceptance remains pending. Shell source reservation released.
+
+## Codex - P2 native devices, WovenWeb and package/update triage (2026-11-28)
+
+Read-only Windows PnP inventory identifies RTL8821CE PCI 10EC:C821 Wi-Fi,
+Realtek USB 0BDA:B00A Bluetooth and Realtek HDA codec 10EC:0897 on this host.
+The documented Intel AX200/AX201 Wi-Fi route does not cover this target.
+Device enumeration is host inventory only. WovenWeb validation and shared
+QEMU ownership remain with the active Stage 31/WovenWeb reservation.
+WovenPackage Stage 22.5 and WovenUpdate Stage 27.5 already have bounded signed
+broker and update-service gates. No subsystem acceptance was changed.
+
+Correction to the earlier storage entry: its desktop framebuffer failure is
+a separate desktop qualification result. The combined-source entry records
+a passing full Windows Stage 10.7 kernel preservation run.
+
+## Codex - WovenFiles refresh framebuffer (2026-11-28)
+
+WovenFiles now displays its refresh count. The desktop harness captures the
+baseline after workspace cancellation and checks the counter's client region
+after keyboard refresh. All ten Python harness tests pass. Fresh desktop QEMU
+acceptance remains pending while the shared lane is reserved. Source
+reservation released.

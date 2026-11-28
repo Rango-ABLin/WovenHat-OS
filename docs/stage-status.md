@@ -1,5 +1,13 @@
 # Stage status
 
+## WovenFiles refresh framebuffer - 2026-11-28
+
+WovenFiles displays its session refresh count beside the Refresh button.
+Desktop qualification captures a pre-keyboard frame after workspace
+cancellation and checks the counter region after Enter. The existing pixel
+threshold and keyboard serial assertion still apply. The Python desktop
+harness tests pass. Fresh 1/2/4-CPU desktop acceptance remains open.
+
 ## WovenShell bottom taskbar stabilization - 2026-11-28
 
 Quick Settings, Notification Center and Start defer the auto-hide state

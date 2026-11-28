@@ -842,6 +842,12 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
             if read_serial(serial).count("WovenFiles: pointer refreshed") != refreshes:
                 raise GateFailure("workspace cancellation activated the Refresh button")
 
+            before_keyboard_frame = output / "files-before-keyboard-refresh.ppm"
+            _, _, before_keyboard = capture_frame(
+                qmp, before_keyboard_frame, time.monotonic() + args.frame_timeout,
+                timings, "before_keyboard_refresh",
+            )
+            screenshots.append(before_keyboard_frame.name)
             keyboard_refresh_started = time.monotonic()
             qmp.key("ret", 90)
             wait_marker(serial, "WovenFiles: keyboard refreshed",
@@ -853,19 +859,14 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
             time.sleep(1.0)
             keyboard_frame = output / "files-keyboard-refresh.ppm"
             _, _, after_keyboard = capture_until_changed(
-                qmp, keyboard_frame, after_pointer,
+                qmp, keyboard_frame, before_keyboard,
                 time.monotonic() + args.frame_timeout, timings, "keyboard_refresh", 20,
-                # WovenFiles opens at (40,40); its Refresh button is local
-                # (344,266,80,20), and the 1280x800 scanout is 2x logical.
-                # Require a change in that actual client region, not an
-                # unrelated part of the desktop.  `WovenFiles` currently
-                # leaves `refresh_count` unrendered; the assertion targets
-                # the strict button/focus repaint rather than inventing a
-                # count oracle.  Keep total-changed-pixel requirement below.
-                region_changed(after_pointer, 768, 612, 160, 40, 20)
+                # The refresh count starts at client-local (258,271).
+                # Client origin is (40,40), and scanout is 2x logical.
+                region_changed(before_keyboard, 596, 622, 160, 30, 20)
             )
             screenshots.append(keyboard_frame.name)
-            if changed_pixels(after_pointer, after_keyboard) < 20:
+            if changed_pixels(before_keyboard, after_keyboard) < 20:
                 raise GateFailure("keyboard refresh did not change the client framebuffer")
 
             close_files_started = time.monotonic()
