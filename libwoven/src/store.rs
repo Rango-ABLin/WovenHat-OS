@@ -386,6 +386,7 @@ impl Transaction {
         if requests.len() > MAX_INSTALLED {
             return Err(Error::Full);
         }
+        let mut staged = self.working;
         let mut pending = [false; MAX_INSTALLED];
         for slot in pending.iter_mut().take(requests.len()) {
             *slot = true;
@@ -397,7 +398,12 @@ impl Transaction {
                 if !pending[index] {
                     continue;
                 }
-                match self.install(requests[index].manifest, requests[index].application_digest) {
+                match staged.install(
+                    requests[index].manifest,
+                    requests[index].application_digest,
+                    0,
+                    0,
+                ) {
                     Ok(()) => {
                         pending[index] = false;
                         remaining -= 1;
@@ -411,6 +417,7 @@ impl Transaction {
                 return Err(Error::MissingDependency);
             }
         }
+        self.working = staged;
         Ok(())
     }
 
@@ -525,6 +532,37 @@ mod tests {
         let mut transaction = store.transaction();
         transaction.install_batch(&requests).unwrap();
         assert_eq!(transaction.commit().count(), 2);
+    }
+
+    #[test]
+    fn failed_batch_discards_partial_installs_and_preserves_prior_edits() {
+        let mut transaction = Store::new(1).transaction();
+        transaction
+            .install(&manifest(b"existing", 1, 1, None), [1; 32])
+            .unwrap();
+        let staged = manifest(b"staged", 1, 1, None);
+        for (blocked, error) in [
+            (
+                manifest(b"blocked", 1, 1, Some(b"missing")),
+                Error::MissingDependency,
+            ),
+            (manifest(b"blocked", 1, 2, None), Error::CapabilityDenied),
+        ] {
+            let requests = [
+                super::InstallRequest {
+                    manifest: &staged,
+                    application_digest: [2; 32],
+                },
+                super::InstallRequest {
+                    manifest: &blocked,
+                    application_digest: [3; 32],
+                },
+            ];
+            assert_eq!(transaction.install_batch(&requests), Err(error));
+        }
+        let store = transaction.commit();
+        assert_eq!(store.count(), 1);
+        assert!(store.contains(b"existing"));
     }
 
     #[test]

@@ -1,5 +1,11 @@
 # Stage status
 
+## WovenUpdate atomic staging - 2026-11-28
+
+Signed candidate bytes and the matching alternate WUAB record now share a
+WovenFS journal commit. Stage 27.5 target Clippy passed with the packaged
+update fixture. UEFI handoff and abrupt installed-image replay remain open.
+
 ## Package rollback replay - 2026-11-28
 
 Recovery returns the replayed catalog to the next package transaction and

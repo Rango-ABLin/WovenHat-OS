@@ -12206,3 +12206,19 @@ Package recovery returns the replayed catalog and preserves rollback
 payloads across install/removal recovery and ambiguous catalog writes.
 Stage 21.9 target Clippy passes. Its new rollback-intent replay case still
 needs the serialized QEMU gate. Source reservation released.
+
+## Codex - atomic package catalog batch (2026-11-28)
+
+The libwoven batch resolver now commits its working catalog only after all
+requests succeed. The regression covers a successful first install followed
+by an unresolved dependency or denied capability. Durable batch publication,
+UEFI A/B selection and installed power-loss acceptance remain open.
+Source reservation released.
+
+## Codex - atomic update slot publication (2026-11-28)
+
+WovenUpdate now commits the signed candidate bytes and matching alternate
+WUAB record in one WovenFS journal transaction. Stage 27.5 target Clippy
+passes with the packaged update fixture. The shared Stage 31/WovenWeb
+reservation has no recorded release. QEMU replay remains pending.
+Source reservation released.

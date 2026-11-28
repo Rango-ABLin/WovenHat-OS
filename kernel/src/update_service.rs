@@ -1,9 +1,9 @@
 //! Privileged WovenUpdate transaction boundary.
 //!
 //! This service is deliberately fail-closed.  It verifies the signed WUPD
-//! envelope before changing metadata, writes the inactive slot before
-//! publishing the corresponding WUAB record, and selects the alternate record
-//! copy for every commit.  The current WovenFS file limit is smaller than the
+//! envelope before changing metadata, commits the inactive slot and its WUAB
+//! record together, and selects the alternate record copy for every commit.
+//! The current WovenFS file limit is smaller than the
 //! package format's maximum image size, so images that cannot be stored in one
 //! durable slot file are rejected rather than partially installed.
 
@@ -119,10 +119,23 @@ pub fn stage_package(package: &[u8], now: u64) -> Result<usize, Error> {
             candidate.digest,
         )
         .map_err(Error::Package)?;
-    let writer = authority()?;
-    crate::wfs::write_vfs_path_durable(&writer, UPDATE_SLOT_PATHS[slot], candidate.image, now)
-        .map_err(|_| Error::Storage)?;
-    persist(&snapshot, &next, now)?;
+    let sequence = snapshot
+        .sequence
+        .checked_add(1)
+        .ok_or(Error::InvalidRecord)?;
+    let mut record = [0u8; crate::update::UPDATE_RECORD_LEN];
+    next.encode_record(sequence, &mut record)
+        .map_err(Error::Package)?;
+    // A cut between independent writes could leave the prior record
+    // pointing at overwritten slot bytes. Replay both files as one commit.
+    crate::wfs::write_vfs_paths_atomic(
+        &[
+            (UPDATE_SLOT_PATHS[slot], candidate.image),
+            (crate::update::UPDATE_RECORD_PATHS[1 - snapshot.copy], &record),
+        ],
+        now,
+    )
+    .map_err(|_| Error::Storage)?;
     Ok(slot)
 }
 
